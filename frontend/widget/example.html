@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Пример встраивания UX Audit Widget</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        .code-block {
+            background: #f4f4f4;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 20px 0;
+        }
+        code {
+            font-family: 'Courier New', monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Пример встраивания UX Audit Widget</h1>
+        
+        <h2>Базовое использование</h2>
+        <p>Создайте контейнер с id="ux-audit-widget" и подключите скрипт:</p>
+        
+        <div class="code-block">
+            <code>
+&lt;div id="ux-audit-widget"&gt;&lt;/div&gt;<br>
+&lt;script src="https://your-domain.com/widget/widget.js"<br>
+        data-api-url="https://your-api-domain.com"&gt;&lt;/script&gt;
+            </code>
+        </div>
+
+        <h2>Кастомизация</h2>
+        <p>Используйте data-атрибуты для настройки внешнего вида:</p>
+        
+        <div class="code-block">
+            <code>
+&lt;script src="https://your-domain.com/widget/widget.js"<br>
+        data-api-url="https://your-api-domain.com"<br>
+        data-button-color="#ff6b6b"<br>
+        data-button-text="Проверить мой сайт"<br>
+        data-text-color="#ffffff"<br>
+        data-container-id="my-custom-container"&gt;&lt;/script&gt;
+            </code>
+        </div>
+
+        <h2>Демо виджета</h2>
+        <div id="ux-audit-widget"></div>
+    </div>
+
+    <!-- Подключение виджета -->
+    <script src="widget.js"
+            data-api-url="http://localhost:3001"
+            data-button-color="#3b82f6"
+            data-button-text="Проверить UX сайта"
+            data-text-color="#ffffff"></script>
+</body>
+</html>
+
+

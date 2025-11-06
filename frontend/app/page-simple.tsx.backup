@@ -1,0 +1,41 @@
+'use client';
+
+export default function Home() {
+  return (
+    <main style={{ padding: '40px', background: '#f5f5f5', minHeight: '100vh' }}>
+      <div style={{ maxWidth: '800px', margin: '0 auto', background: 'white', padding: '40px', borderRadius: '8px' }}>
+        <h1 style={{ fontSize: '32px', marginBottom: '20px' }}>UX Audit Service</h1>
+        <p style={{ fontSize: '18px', color: '#666', marginBottom: '30px' }}>
+          Автоматический анализ UX/UI вашего сайта
+        </p>
+        
+        <div style={{ marginBottom: '30px' }}>
+          <input 
+            type="text" 
+            placeholder="Введите URL сайта" 
+            style={{ width: '70%', padding: '12px', fontSize: '16px', border: '1px solid #ddd', borderRadius: '4px' }}
+          />
+          <button 
+            style={{ width: '25%', marginLeft: '5%', padding: '12px', fontSize: '16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+          >
+            Проверить
+          </button>
+        </div>
+
+        <div style={{ background: '#f9f9f9', padding: '20px', borderRadius: '4px' }}>
+          <h2 style={{ fontSize: '24px', marginBottom: '15px' }}>Что мы проверяем?</h2>
+          <ul style={{ listStyle: 'none', padding: 0 }}>
+            <li style={{ padding: '8px 0' }}>✓ Типографика и читаемость текста</li>
+            <li style={{ padding: '8px 0' }}>✓ Контрастность цветов (WCAG AA)</li>
+            <li style={{ padding: '8px 0' }}>✓ Призывы к действию (CTA)</li>
+            <li style={{ padding: '8px 0' }}>✓ Скорость загрузки страницы</li>
+            <li style={{ padding: '8px 0' }}>✓ Адаптивность для мобильных устройств</li>
+            <li style={{ padding: '8px 0' }}>✓ Визуальный дизайн и композиция</li>
+          </ul>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+
