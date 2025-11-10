@@ -83,12 +83,90 @@ router.post('/', async (req, res) => {
       console.log('   Формат изображения:', imageDataUrl.substring(0, 30) + '...');
       console.log('   Размер изображения (base64 длина):', imageDataUrl.length, 'символов');
       
+      // Проверяем размер изображения (примерно 1MB лимит для Hugging Face)
+      const base64Data = imageDataUrl.split(',')[1] || imageDataUrl;
+      const estimatedSizeMB = (base64Data.length * 3) / 4 / 1024 / 1024;
+      console.log('   Примерный размер изображения:', estimatedSizeMB.toFixed(2), 'MB');
+      
+      // Если изображение слишком большое (>1MB), предупреждаем
+      if (estimatedSizeMB > 1.0) {
+        console.warn('⚠️  Изображение слишком большое для Hugging Face API (лимит ~1MB)');
+        console.warn('   Попробую уменьшить изображение через Puppeteer...');
+        
+        try {
+          // Используем Puppeteer для уменьшения изображения
+          browser = await puppeteer.launch({
+            headless: true,
+            args: [
+              '--no-sandbox',
+              '--disable-setuid-sandbox',
+              '--disable-dev-shm-usage',
+            ],
+          });
+          
+          page = await browser.newPage();
+          
+          // Загружаем изображение в data URL и создаем временную страницу
+          await page.setContent(`
+            <html>
+              <body style="margin:0;padding:0;">
+                <img id="img" src="${imageDataUrl}" style="max-width:1920px;max-height:1080px;width:auto;height:auto;" />
+              </body>
+            </html>
+          `);
+          
+          // Ждем загрузки изображения
+          await page.waitForSelector('#img');
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Делаем скриншот с уменьшенным размером
+          const resizedScreenshot = await page.screenshot({
+            type: 'jpeg',
+            quality: 75,
+            encoding: 'base64',
+          }) as string;
+          
+          const resizedImageDataUrl = `data:image/jpeg;base64,${resizedScreenshot}`;
+          const resizedBase64Data = resizedScreenshot;
+          const resizedSizeMB = (resizedBase64Data.length * 3) / 4 / 1024 / 1024;
+          
+          console.log('✅ Изображение уменьшено до:', resizedSizeMB.toFixed(2), 'MB');
+          
+          // Используем уменьшенное изображение
+          imageDataUrl = resizedImageDataUrl;
+          
+          // Закрываем браузер
+          await page.close();
+          await browser.close();
+          browser = null;
+          page = null;
+        } catch (resizeError) {
+          console.error('❌ Не удалось уменьшить изображение:', resizeError);
+          // Продолжаем с оригинальным изображением
+        }
+      }
+      
       try {
         const visionAnalysis = await analyzeScreenshot(imageDataUrl);
         console.log('✅ Визуальный анализ завершен');
         console.log('   Найдено проблем:', visionAnalysis.issues.length);
         console.log('   Рекомендаций:', visionAnalysis.suggestions.length);
         console.log('   Оценка:', visionAnalysis.overallScore);
+
+        // Проверяем, не является ли это моковым результатом (если ИИ не сработал)
+        const isMockResult = visionAnalysis.visualDescription?.includes('Визуальный анализ недоступен') ||
+                            visionAnalysis.visualDescription?.includes('недоступны или не настроены') ||
+                            (visionAnalysis.issues.length === 1 && 
+                             typeof visionAnalysis.issues[0] === 'string' &&
+                             visionAnalysis.issues[0].includes('недоступен'));
+        
+        if (isMockResult) {
+          console.error('❌ Получен моковый результат - ИИ не сработал, возвращаю ошибку');
+          return res.status(500).json({
+            error: 'AI analysis failed',
+            message: 'Визуальный анализ через AI недоступен. Проверьте настройки API ключей (HUGGINGFACE_API_KEY или OPENAI_API_KEY).',
+          });
+        }
 
         // Создаем минимальные метрики для отчета (так как нет HTML)
         const metrics = {
@@ -137,8 +215,35 @@ router.post('/', async (req, res) => {
         if (visionError instanceof Error) {
           console.error('   Message:', visionError.message);
           console.error('   Stack:', visionError.stack?.substring(0, 500));
+          
+          // Если ошибка связана с размером изображения (413), возвращаем понятное сообщение
+          if (visionError.message.includes('413') || 
+              visionError.message.includes('too large') || 
+              visionError.message.includes('request entity too large')) {
+            return res.status(413).json({
+              error: 'Image too large',
+              message: 'Изображение слишком большое для анализа. Пожалуйста, уменьшите размер изображения до 1MB или меньше перед загрузкой.',
+              hint: 'Попробуйте сжать изображение или уменьшить его разрешение.',
+            });
+          }
         }
         throw visionError; // Пробрасываем ошибку дальше для общей обработки
+      } finally {
+        // Закрываем браузер, если он был открыт для уменьшения изображения
+        if (page) {
+          try {
+            await page.close();
+          } catch (e) {
+            // Игнорируем ошибки при закрытии
+          }
+        }
+        if (browser) {
+          try {
+            await browser.close();
+          } catch (e) {
+            // Игнорируем ошибки при закрытии
+          }
+        }
       }
     }
 
@@ -197,14 +302,34 @@ router.post('/', async (req, res) => {
     // Функция для создания адаптивного скриншота с постепенным снижением качества
     const createAdaptiveScreenshot = async (maxSizeMB: number = 8): Promise<string> => {
       // Адаптируем настройки в зависимости от требуемого размера
+      const isVerySmallLimit = maxSizeMB < 1; // Для очень малых лимитов (<1MB) используем очень агрессивные настройки
       const isSmallLimit = maxSizeMB <= 2; // Для малых лимитов (1-2MB) используем более агрессивные настройки
-      const qualitySteps = isSmallLimit ? [60, 45, 35, 25] : [85, 75, 60, 45];
-      const widthSteps = isSmallLimit ? [1280, 1024, 800] : [1600, 1280, 1024];
-      const maxHeight = isSmallLimit ? 2000 : 3000; // Для малых лимитов обрезаем более агрессивно
+      
+      let qualitySteps: number[];
+      let widthSteps: number[];
+      let maxHeight: number;
+      
+      if (isVerySmallLimit) {
+        // Очень агрессивные настройки для размеров <1MB
+        qualitySteps = [30, 20, 15, 10];
+        widthSteps = [800, 640, 480];
+        maxHeight = 1500;
+      } else if (isSmallLimit) {
+        // Агрессивные настройки для размеров 1-2MB
+        qualitySteps = [60, 45, 35, 25];
+        widthSteps = [1280, 1024, 800];
+        maxHeight = 2000;
+      } else {
+        // Стандартные настройки для больших размеров
+        qualitySteps = [85, 75, 60, 45];
+        widthSteps = [1600, 1280, 1024];
+        maxHeight = 3000;
+      }
       
       console.log('📸 Создаю адаптивный скриншот для AI анализа...');
       console.log('   Максимальный размер:', maxSizeMB, 'MB');
-      console.log('   Режим:', isSmallLimit ? 'агрессивный (малый лимит)' : 'стандартный');
+      const mode = isVerySmallLimit ? 'очень агрессивный (<1MB)' : isSmallLimit ? 'агрессивный (1-2MB)' : 'стандартный';
+      console.log('   Режим:', mode);
       
       // Сначала получаем размеры страницы для полного скриншота
       const pageHeight = await page.evaluate(() => {
@@ -356,25 +481,22 @@ router.post('/', async (req, res) => {
       console.log('   Visual Description:', visionAnalysis.visualDescription ? `есть (${visionAnalysis.visualDescription.length} символов)` : 'отсутствует');
       console.log('   Free Form Analysis:', visionAnalysis.freeFormAnalysis ? `есть (${visionAnalysis.freeFormAnalysis.length} символов)` : 'отсутствует');
       
+      // Проверяем, не является ли это моковым результатом (если ИИ не сработал)
+      const isMockResult = visionAnalysis?.visualDescription?.includes('Визуальный анализ недоступен') ||
+                          visionAnalysis?.visualDescription?.includes('недоступны или не настроены') ||
+                          (visionAnalysis?.issues?.length === 1 && 
+                           typeof visionAnalysis.issues[0] === 'string' &&
+                           visionAnalysis.issues[0].includes('недоступен'));
+      
+      if (isMockResult) {
+        console.error('❌ Получен моковый результат - ИИ не сработал, выбрасываю ошибку');
+        throw new Error('Визуальный анализ через AI недоступен. Проверьте настройки API ключей (HUGGINGFACE_API_KEY или OPENAI_API_KEY).');
+      }
+      
       // Проверяем, что анализ действительно выполнился
       if (!visionAnalysis || (visionAnalysis.overallScore === 0 && !visionAnalysis.visualDescription && !visionAnalysis.freeFormAnalysis)) {
         console.warn('⚠️  Анализ вернул пустой результат, возможно была ошибка');
         console.warn('   Проверяю, нужно ли повторить анализ...');
-        
-        // Если анализ не выполнился, пробуем еще раз с меньшим размером
-        if (visionAnalysis && visionAnalysis.visualDescription && visionAnalysis.visualDescription.includes('недоступен')) {
-          console.log('   ⚠️ Анализ вернул ошибку, пробую повторить с меньшим размером скриншота...');
-          try {
-            const fallbackScreenshot = await createAdaptiveScreenshot(2); // Пробуем с 2MB
-            visionAnalysis = await analyzeScreenshot(`data:image/jpeg;base64,${fallbackScreenshot}`);
-            console.log('✅ Повторный анализ завершен');
-            console.log('   Найдено проблем:', visionAnalysis.issues.length);
-            console.log('   Оценка:', visionAnalysis.overallScore);
-          } catch (retryError: any) {
-            console.error('❌ Повторный анализ также не удался:', retryError.message);
-            // Продолжаем с текущим результатом
-          }
-        }
       }
     } catch (error: any) {
       console.error('❌ Ошибка при анализе скриншота:', error.message);
@@ -388,7 +510,7 @@ router.post('/', async (req, res) => {
         try {
           // Пробуем с более агрессивными настройками - уменьшаем размер постепенно
           let fallbackScreenshot: string | null = null;
-          const sizes = [4, 3, 2, 1]; // Пробуем размеры от 4MB до 1MB
+          const sizes = [4, 3, 2, 1, 0.5, 0.3]; // Пробуем размеры от 4MB до 0.3MB
           
           for (const sizeMB of sizes) {
             console.log(`   Пробую создать скриншот размером до ${sizeMB}MB...`);
@@ -401,7 +523,7 @@ router.post('/', async (req, res) => {
               console.log('✅ Визуальный анализ завершен (с пониженным качеством)');
               break; // Успешно проанализировали
             } catch (retryError: any) {
-              if (retryError.isSizeError || retryError.message?.includes('413')) {
+              if (retryError.isSizeError || retryError.message?.includes('413') || retryError.message?.includes('too large')) {
                 console.log(`   Размер ${sizeMB}MB все еще слишком большой, пробую меньше...`);
                 continue; // Пробуем следующий размер
               } else {
@@ -411,7 +533,10 @@ router.post('/', async (req, res) => {
           }
           
           if (!visionAnalysis) {
-            throw new Error('Не удалось создать скриншот подходящего размера для анализа');
+            // Если даже с минимальным размером не получилось, возвращаем понятную ошибку
+            const sizeError = new Error('Изображение слишком большое для анализа. Даже после агрессивного сжатия размер превышает лимит API (~1MB).');
+            (sizeError as any).isSizeError = true;
+            throw sizeError;
           }
         } catch (retryError: any) {
           console.error('❌ Не удалось проанализировать даже с минимальным размером:', retryError.message);
@@ -455,6 +580,27 @@ router.post('/', async (req, res) => {
       }
     } catch (closeError) {
       console.error('❌ Error closing browser:', closeError);
+    }
+    
+    // Если это ошибка размера изображения, возвращаем специальный статус
+    if (error && typeof error === 'object' && 'isSizeError' in error && (error as any).isSizeError) {
+      return res.status(413).json({
+        error: 'Image too large',
+        message: error instanceof Error ? error.message : 'Изображение слишком большое для анализа.',
+        hint: 'Попробуйте проанализировать сайт с меньшим количеством контента или используйте другой URL.',
+      });
+    }
+    
+    // Если это ошибка недоступности ИИ
+    if (error instanceof Error && 
+        (error.message.includes('недоступен') || 
+         error.message.includes('не настроены') ||
+         error.message.includes('API ключей'))) {
+      return res.status(503).json({
+        error: 'AI service unavailable',
+        message: error.message,
+        hint: 'Проверьте настройки API ключей (HUGGINGFACE_API_KEY или OPENAI_API_KEY) в переменных окружения.',
+      });
     }
     
     res.status(500).json({ 

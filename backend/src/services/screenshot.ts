@@ -19,18 +19,13 @@ async function getBrowser(): Promise<Browser> {
         '--disable-gpu',
         '--disable-software-rasterizer',
         '--disable-extensions',
-        '--single-process', // Важно для Render free plan
       ],
     };
 
-    // На Render используем установленный Chrome
+    // На Render используем установленный Chrome и добавляем --single-process
     if (process.env.NODE_ENV === 'production') {
-      // Проверяем, есть ли Chrome в стандартных местах
-      const chromePaths = [
-        '/usr/bin/google-chrome',
-        '/usr/bin/chromium-browser',
-        '/usr/bin/chromium',
-      ];
+      // Добавляем --single-process только для production (Render)
+      launchOptions.args.push('--single-process');
       
       // Если Chrome установлен через puppeteer, используем его
       const puppeteerChrome = process.env.PUPPETEER_EXECUTABLE_PATH;

@@ -1004,8 +1004,17 @@ export async function analyzeScreenshot(screenshotBase64: string): Promise<Visio
         console.log('   Свободный анализ:', result.freeFormAnalysis ? `есть (${result.freeFormAnalysis.length} символов)` : 'отсутствует');
         
         return result;
+      } else if (hf.isSizeError) {
+        // Если это ошибка размера, выбрасываем специальную ошибку
+        const sizeError = new Error('Request failed with status code 413: Image too large');
+        (sizeError as any).isSizeError = true;
+        throw sizeError;
       }
     } catch (error) {
+      // Если это ошибка размера, пробрасываем её дальше
+      if (error && typeof error === 'object' && 'isSizeError' in error && (error as any).isSizeError) {
+        throw error;
+      }
       console.warn('⚠️  Hugging Face Router API недоступен:', error);
     }
   }
@@ -1022,18 +1031,9 @@ export async function analyzeScreenshot(screenshotBase64: string): Promise<Visio
     }
   }
   
-  // Если все fallback не сработали, возвращаем сообщение об ошибке
-  console.log('❌ Все сервисы vision анализа недоступны, возвращаю текстовый фоллбек');
-  return {
-    issues: ['Визуальный анализ через AI недоступен или произошла ошибка'],
-    suggestions: [
-      'Попробуйте снова позже',
-      'Проверьте настройки Hugging Face API (HUGGINGFACE_API_KEY)',
-      'Проверьте доступность альтернативных сервисов (OpenAI Vision API)',
-    ],
-    overallScore: 75,
-    visualDescription: 'Визуальный анализ недоступен. Все сервисы vision анализа (Hugging Face, OpenAI) недоступны или не настроены.',
-  };
+  // Если все fallback не сработали, выбрасываем ошибку вместо мокового отчета
+  console.log('❌ Все сервисы vision анализа недоступны, выбрасываю ошибку');
+  throw new Error('Визуальный анализ недоступен. Все сервисы vision анализа (Hugging Face, OpenAI) недоступны или не настроены. Проверьте настройки API ключей.');
 }
 
 async function analyzeWithOpenAI(screenshotBase64: string): Promise<VisionAnalysisResult> {
