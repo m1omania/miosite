@@ -229,7 +229,10 @@ export default function AuditForm({ onAuditStart, onAuditComplete, onError }: Au
     onAuditStart();
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4001';
+      // Используем относительный путь для проксирования через Vercel
+      // Если NEXT_PUBLIC_API_URL указан, используем его, иначе используем относительный путь
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+      const apiEndpoint = apiUrl ? `${apiUrl}/api/audit` : '/api/audit';
       
       let body: any;
       let headers: Record<string, string> = {};
@@ -246,7 +249,7 @@ export default function AuditForm({ onAuditStart, onAuditComplete, onError }: Au
         headers['Content-Type'] = 'application/json';
       }
 
-      const response = await fetch(`${apiUrl}/api/audit`, {
+      const response = await fetch(apiEndpoint, {
         method: 'POST',
         headers,
         body,

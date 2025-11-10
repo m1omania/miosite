@@ -16,8 +16,10 @@ export default function ReportPage() {
   useEffect(() => {
     const fetchReport = async () => {
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4001';
-        const response = await fetch(`${apiUrl}/api/report/${reportId}`);
+        // Используем относительный путь для проксирования через Vercel
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+        const apiEndpoint = apiUrl ? `${apiUrl}/api/report/${reportId}` : `/api/report/${reportId}`;
+        const response = await fetch(apiEndpoint);
 
         if (!response.ok) {
           throw new Error('Отчёт не найден');

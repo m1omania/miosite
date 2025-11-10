@@ -3,7 +3,13 @@
   "devCommand": "npm run dev",
   "installCommand": "npm install",
   "framework": "nextjs",
-  "outputDirectory": ".next"
+  "outputDirectory": ".next",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "http://53893873b619.vps.myjino.ru:4001/api/:path*"
+    }
+  ]
 }
 
 

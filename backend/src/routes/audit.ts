@@ -15,7 +15,7 @@ const router = Router();
 let dbInitialized = false;
 
 /**
- * Находит путь к Chrome на Render
+ * Находит путь к Chrome (на Render или VPS)
  */
 function findChromePath(): string | null {
   console.log('🔍 Ищу Chrome...');
@@ -28,9 +28,14 @@ function findChromePath(): string | null {
     return process.env.PUPPETEER_EXECUTABLE_PATH;
   }
 
-  // Пробуем найти Chrome в кеше Puppeteer на Render
+  // Определяем, где запущен сервер (Render или VPS)
+  const isRender = process.env.RENDER === 'true' || existsSync('/opt/render');
+  
+  // Пробуем найти Chrome в кеше Puppeteer на Render или VPS
   // Сначала проверяем директорию проекта (сохраняется между build и runtime)
-  const projectCacheDir = '/opt/render/project/src/backend/.local-chromium';
+  const projectCacheDir = isRender 
+    ? '/opt/render/project/src/backend/.local-chromium'
+    : process.env.PUPPETEER_CACHE_DIR || join(process.cwd(), '.local-chromium');
   const projectChromePath = join(projectCacheDir, 'chrome');
   
   console.log('   Проверяю путь к Chrome в проекте:', projectChromePath);
@@ -225,9 +230,19 @@ router.post('/', async (req, res) => {
             ],
           };
 
-          // На Render добавляем --single-process
-          if (process.env.NODE_ENV === 'production') {
+          // Определяем, где запущен сервер (Render или VPS)
+          const isRender = process.env.RENDER === 'true' || existsSync('/opt/render');
+          
+          if (isRender) {
+            // На Render добавляем --single-process (нужен из-за ограниченных ресурсов)
             resizeLaunchOptions.args.push('--single-process');
+            const chromePath = findChromePath();
+            if (chromePath) {
+              resizeLaunchOptions.executablePath = chromePath;
+              console.log('🔧 Использую Chrome по пути (для уменьшения изображения):', chromePath);
+            }
+          } else {
+            // На VPS не нужен --single-process, больше ресурсов
             const chromePath = findChromePath();
             if (chromePath) {
               resizeLaunchOptions.executablePath = chromePath;
@@ -448,8 +463,8 @@ router.post('/', async (req, res) => {
     // Стратегия 1: Пробуем domcontentloaded (быстро, но может не сработать для медленных сайтов)
     try {
       console.log('📡 Пробую загрузить страницу с domcontentloaded (таймаут 45 сек)...');
-      await page.goto(normalizedUrl, {
-        waitUntil: 'domcontentloaded',
+    await page.goto(normalizedUrl, {
+      waitUntil: 'domcontentloaded',
         timeout: 45000,
       });
       pageLoaded = true;

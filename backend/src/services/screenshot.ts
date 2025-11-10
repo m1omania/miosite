@@ -11,7 +11,7 @@ export interface ScreenshotResult {
 let browserInstance: Browser | null = null;
 
 /**
- * Находит путь к Chrome на Render
+ * Находит путь к Chrome (на Render или VPS)
  */
 function findChromePath(): string | null {
   console.log('🔍 Ищу Chrome...');
@@ -24,9 +24,14 @@ function findChromePath(): string | null {
     return process.env.PUPPETEER_EXECUTABLE_PATH;
   }
 
+  // Определяем, где запущен сервер (Render или VPS)
+  const isRender = process.env.RENDER === 'true' || existsSync('/opt/render');
+  
   // Пробуем найти Chrome в кеше Puppeteer на Render
   // Сначала проверяем директорию проекта (сохраняется между build и runtime)
-  const projectCacheDir = '/opt/render/project/src/backend/.local-chromium';
+  const projectCacheDir = isRender 
+    ? '/opt/render/project/src/backend/.local-chromium'
+    : process.env.PUPPETEER_CACHE_DIR || join(process.cwd(), '.local-chromium');
   const projectChromePath = join(projectCacheDir, 'chrome');
   
   console.log('   Проверяю путь к Chrome в проекте:', projectChromePath);
@@ -139,9 +144,13 @@ async function getBrowser(): Promise<Browser> {
       ],
     };
 
-    // На Render используем установленный Chrome и добавляем --single-process
-    if (process.env.NODE_ENV === 'production') {
-      // Добавляем --single-process только для production (Render)
+    // Определяем, где запущен сервер (Render или VPS)
+    const isRender = process.env.RENDER === 'true' || existsSync('/opt/render');
+    const isVPS = !isRender && process.env.NODE_ENV === 'production';
+    
+    if (isRender) {
+      // На Render используем установленный Chrome и добавляем --single-process
+      // (нужен из-за ограниченных ресурсов на Free tier)
       launchOptions.args.push('--single-process');
       
       // Пробуем найти Chrome
@@ -151,6 +160,17 @@ async function getBrowser(): Promise<Browser> {
         console.log('🔧 Использую Chrome по пути:', chromePath);
       } else {
         console.warn('⚠️  Chrome не найден, Puppeteer попытается найти его автоматически');
+      }
+    } else if (isVPS) {
+      // На VPS больше ресурсов, не нужен --single-process
+      // Пробуем найти Chrome в стандартных местах или через Puppeteer
+      const chromePath = findChromePath();
+      if (chromePath) {
+        launchOptions.executablePath = chromePath;
+        console.log('🔧 Использую Chrome по пути:', chromePath);
+      } else {
+        // На VPS Puppeteer должен найти Chrome автоматически
+        console.log('🔧 Puppeteer найдет Chrome автоматически');
       }
     }
 
