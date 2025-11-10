@@ -30,10 +30,21 @@ export async function POST(request: NextRequest) {
       console.log('📥 API route: получен ответ от backend', { status: response.status, ok: response.ok });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        console.error('❌ API route: ошибка от backend', { status: response.status, error: errorData });
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error', message: 'Failed to parse error response' }));
+        console.error('❌ API route: ошибка от backend', { 
+          status: response.status, 
+          error: errorData.error,
+          message: errorData.message,
+          fullError: errorData
+        });
+        
+        // Передаем детали ошибки от backend клиенту
         return NextResponse.json(
-          { error: errorData.error || 'Backend error' },
+          { 
+            error: errorData.error || 'Backend error',
+            message: errorData.message || errorData.error || 'Unknown error',
+            details: process.env.NODE_ENV === 'development' ? errorData : undefined
+          },
           { status: response.status }
         );
       }
