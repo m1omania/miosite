@@ -582,30 +582,18 @@ router.post('/', async (req, res) => {
       const minQuality = qualitySteps[qualitySteps.length - 1];
       
       for (const width of widthSteps) {
-        console.log(`   Пробую ширину ${width}px с качеством ${minQuality}% (полная страница)...`);
+        console.log(`   Пробую ширину ${width}px с качеством ${minQuality}% (viewport)...`);
         
         // Временно меняем viewport для уменьшения разрешения
         await page.setViewport({ width: width, height: 1080 });
         await new Promise(resolve => setTimeout(resolve, 500)); // Даем время на перерисовку
         
-        const screenshotOptions: any = {
+        const screenshot = await page.screenshot({
           type: 'jpeg',
           quality: minQuality,
           encoding: 'base64',
-        };
-        
-        if (shouldClip) {
-          screenshotOptions.clip = {
-            x: 0,
-            y: 0,
-            width: width,
-            height: screenshotHeight,
-          };
-        } else {
-          screenshotOptions.fullPage = true;
-        }
-        
-        const screenshot = await page.screenshot(screenshotOptions) as string;
+          // Без fullPage - только viewport
+        }) as string;
         
         // Восстанавливаем viewport
         await page.setViewport({ width: 1920, height: 1080 });
@@ -617,17 +605,15 @@ router.post('/', async (req, res) => {
         console.log(`   Размер base64: ${(base64Size / 1024).toFixed(2)} KB (примерно ${estimatedSizeMB.toFixed(2)} MB изображения)`);
         
         if (estimatedSizeMB <= maxSizeMB) {
-          console.log(`✅ Скриншот создан с шириной ${width}px и качеством ${minQuality}% (полная страница)`);
+          console.log(`✅ Скриншот viewport создан с шириной ${width}px и качеством ${minQuality}%`);
           return screenshot;
         }
       }
       
-      // Если даже с минимальной шириной размер большой, только тогда обрезаем высоту
-      // Это крайний случай - лучше видеть верх страницы, чем ничего
+      // Если даже с минимальной шириной размер большой, используем минимальное качество
       const finalWidth = widthSteps[widthSteps.length - 1];
-      const finalQuality = Math.max(25, minQuality - 5); // Еще немного снижаем качество
-      const finalHeight = shouldClip ? Math.min(screenshotHeight, 5000) : Math.min(maxHeight, pageHeight);
-      console.log(`   ⚠️ Даже с минимальной шириной размер большой, обрезаю верх страницы ${finalHeight}px...`);
+      const finalQuality = Math.max(20, minQuality - 5);
+      console.log(`   ⚠️ Использую минимальные настройки: ширина ${finalWidth}px, качество ${finalQuality}%...`);
       
       await page.setViewport({ width: finalWidth, height: 1080 });
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -635,19 +621,14 @@ router.post('/', async (req, res) => {
       const finalScreenshot = await page.screenshot({
         type: 'jpeg',
         quality: finalQuality,
-        clip: {
-          x: 0,
-          y: 0,
-          width: finalWidth,
-          height: finalHeight, // Обрезаем, но стараемся захватить максимум
-        },
         encoding: 'base64',
+        // Без fullPage - только viewport
       }) as string;
       
       // Восстанавливаем viewport
       await page.setViewport({ width: 1920, height: 1080 });
       
-      console.log(`✅ Скриншот создан с минимальными настройками (верх ${maxHeight}px, ширина ${finalWidth}px, качество ${finalQuality}%)`);
+      console.log(`✅ Скриншот viewport создан с минимальными настройками (ширина ${finalWidth}px, качество ${finalQuality}%)`);
       return finalScreenshot;
     };
 
@@ -666,21 +647,15 @@ router.post('/', async (req, res) => {
       encoding: 'base64',
     }) as string;
 
-    // Мобильный скриншот не создается и не отправляется на анализ
-    // (закомментировано для экономии ресурсов)
-    /*
-        await page.setViewport({ width: 1920, height: 1080 });
-        await new Promise(resolve => setTimeout(resolve, 300));
-
+    // Мобильный скриншот - viewport (быстрее)
     await page.setViewport({ width: 375, height: 667 });
     await new Promise(resolve => setTimeout(resolve, 500));
 
     const mobileScreenshot = await page.screenshot({
       type: 'png',
-      fullPage: true,
+      // Без fullPage - только viewport (видимая область)
       encoding: 'base64',
     }) as string;
-    */
 
     const screenshots = {
       desktop: `data:image/png;base64,${desktopScreenshotFull}`,
