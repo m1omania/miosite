@@ -9,7 +9,7 @@ let browserInstance: Browser | null = null;
 
 async function getBrowser(): Promise<Browser> {
   if (!browserInstance) {
-    browserInstance = await puppeteer.launch({
+    const launchOptions: any = {
       headless: true,
       args: [
         '--no-sandbox',
@@ -17,8 +17,29 @@ async function getBrowser(): Promise<Browser> {
         '--disable-dev-shm-usage',
         '--disable-accelerated-2d-canvas',
         '--disable-gpu',
+        '--disable-software-rasterizer',
+        '--disable-extensions',
+        '--single-process', // Важно для Render free plan
       ],
-    });
+    };
+
+    // На Render используем установленный Chrome
+    if (process.env.NODE_ENV === 'production') {
+      // Проверяем, есть ли Chrome в стандартных местах
+      const chromePaths = [
+        '/usr/bin/google-chrome',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium',
+      ];
+      
+      // Если Chrome установлен через puppeteer, используем его
+      const puppeteerChrome = process.env.PUPPETEER_EXECUTABLE_PATH;
+      if (puppeteerChrome) {
+        launchOptions.executablePath = puppeteerChrome;
+      }
+    }
+
+    browserInstance = await puppeteer.launch(launchOptions);
   }
   return browserInstance;
 }
