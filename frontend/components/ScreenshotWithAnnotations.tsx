@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import type { Issue } from '../../src/types';
+import type { Issue } from '@/src/types';
 
 interface ScreenshotWithAnnotationsProps {
   screenshot: string;

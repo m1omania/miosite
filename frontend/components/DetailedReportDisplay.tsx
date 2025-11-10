@@ -1,6 +1,6 @@
 'use client';
 
-import type { DetailedReport } from '../src/types';
+import type { DetailedReport } from '@/src/types';
 import { useState } from 'react';
 
 interface DetailedReportDisplayProps {
@@ -167,7 +167,7 @@ export default function DetailedReportDisplay({ report }: DetailedReportDisplayP
               <ul className="list-disc list-inside space-y-1 mb-4">
                 {report.ctas.buttons.map((btn, i) => (
                   <li key={i} className="text-sm">
-                    "{btn.text}" - {btn.location} ({btn.visibility})
+                    &quot;{btn.text}&quot; - {btn.location} ({btn.visibility})
                   </li>
                 ))}
               </ul>

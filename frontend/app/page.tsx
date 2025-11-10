@@ -4,7 +4,7 @@ import { useState } from 'react';
 import AuditForm from '@/components/AuditForm';
 import ReportDisplay from '@/components/ReportDisplay';
 import LeadForm from '@/components/LeadForm';
-import type { AuditReport } from '../src/types';
+import type { AuditReport } from '@/src/types';
 
 export default function Home() {
   const [report, setReport] = useState<AuditReport | null>(null);

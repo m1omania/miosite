@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import ReportDisplay from '@/components/ReportDisplay';
 import LeadForm from '@/components/LeadForm';
-import type { AuditReport } from '../../../src/types';
+import type { AuditReport } from '@/src/types';
 
 export default function ReportPage() {
   const params = useParams();

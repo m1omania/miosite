@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { AuditReport } from '../src/types';
+import type { AuditReport } from '@/src/types';
 import ScreenshotWithAnnotations from './ScreenshotWithAnnotations';
 import UXScoreChart from './UXScoreChart';
 import PrincipleTooltip, { parseTextWithPrinciples } from './PrincipleTooltip';

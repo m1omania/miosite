@@ -217,12 +217,13 @@ export function parseTextWithPrinciples(text: string): (string | { type: 'princi
     ];
     
     patterns.forEach(pattern => {
-      let match;
+      let match: RegExpExecArray | null;
       pattern.lastIndex = 0;
       while ((match = pattern.exec(text)) !== null) {
         // Проверяем, не находится ли совпадение внутри другого совпадения
+        if (!match) break;
         const isInsideOther = matches.some(existing => 
-          match.index >= existing.index && match.index < existing.index + existing.length
+          match!.index >= existing.index && match!.index < existing.index + existing.length
         );
         
         if (!isInsideOther) {

@@ -1,6 +1,6 @@
 'use client';
 
-import type { AuditReport } from '../src/types';
+import type { AuditReport } from '@/src/types';
 
 interface UXScoreChartProps {
   report: AuditReport;
