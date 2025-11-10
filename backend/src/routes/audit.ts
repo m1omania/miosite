@@ -496,16 +496,39 @@ router.post('/', async (req, res) => {
       
       console.log('   Высота страницы:', pageHeight, 'px');
       
+      // Ограничиваем максимальную высоту для очень больших страниц (чтобы избежать падения сервера)
+      const MAX_SCREENSHOT_HEIGHT = 10000; // Максимум 10000px высоты
+      const shouldClip = pageHeight > MAX_SCREENSHOT_HEIGHT;
+      const screenshotHeight = shouldClip ? MAX_SCREENSHOT_HEIGHT : pageHeight;
+      
+      if (shouldClip) {
+        console.warn(`   ⚠️ Страница очень высокая (${pageHeight}px), ограничиваю до ${MAX_SCREENSHOT_HEIGHT}px для стабильности`);
+      }
+      
       // Пробуем разные настройки качества
       for (const quality of qualitySteps) {
         console.log(`   Пробую качество ${quality}%...`);
         
-        const screenshot = await page.screenshot({
+        const screenshotOptions: any = {
           type: 'jpeg',
           quality: quality,
-          fullPage: true, // Полный скриншот страницы
           encoding: 'base64',
-        }) as string;
+        };
+        
+        if (shouldClip) {
+          // Для очень больших страниц используем clip вместо fullPage
+          screenshotOptions.clip = {
+            x: 0,
+            y: 0,
+            width: widthSteps[0] || 1920,
+            height: screenshotHeight,
+          };
+        } else {
+          // Для обычных страниц используем fullPage
+          screenshotOptions.fullPage = true;
+        }
+        
+        const screenshot = await page.screenshot(screenshotOptions) as string;
 
         // Проверяем размер base64 (примерно 4/3 от реального размера)
         const base64Size = screenshot.length;
