@@ -127,12 +127,13 @@ NEXT_PUBLIC_API_URL=http://localhost:3001
 3. Настройки:
    - **Name:** `ux-audit-backend`
    - **Environment:** Node
-   - **Build Command:** `cd backend && npm install && PUPPETEER_SKIP_DOWNLOAD=false npx puppeteer browsers install chrome && npm run build`
+   - **Build Command:** `cd backend && npm install && PUPPETEER_SKIP_DOWNLOAD=false PUPPETEER_CACHE_DIR=/opt/render/project/src/backend/.local-chromium npx puppeteer browsers install chrome && npm run build`
    - **Start Command:** `cd backend && npm start`
    - **Plan:** Free (или выберите нужный)
 4. Установите переменные окружения:
    - `NODE_ENV=production`
    - `PORT=10000` (Render автоматически устанавливает PORT, но можно указать явно)
+   - `PUPPETEER_CACHE_DIR=/opt/render/project/src/backend/.local-chromium` (важно для работы Chrome)
    - `OPENAI_API_KEY` - ваш ключ OpenAI (опционально)
    - `HUGGINGFACE_API_KEY` - ваш токен Hugging Face (опционально, но рекомендуется)
    - `CORS_ORIGIN` - URL вашего frontend на Vercel (например: `https://your-app.vercel.app`)
