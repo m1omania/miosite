@@ -95,14 +95,29 @@ router.post('/', async (req, res) => {
         
         try {
           // Используем Puppeteer для уменьшения изображения
-          browser = await puppeteer.launch({
+          const resizeLaunchOptions: any = {
             headless: true,
             args: [
               '--no-sandbox',
               '--disable-setuid-sandbox',
               '--disable-dev-shm-usage',
+              '--disable-accelerated-2d-canvas',
+              '--disable-gpu',
+              '--disable-software-rasterizer',
+              '--disable-extensions',
             ],
-          });
+          };
+
+          // На Render добавляем --single-process
+          if (process.env.NODE_ENV === 'production') {
+            resizeLaunchOptions.args.push('--single-process');
+            const puppeteerChrome = process.env.PUPPETEER_EXECUTABLE_PATH;
+            if (puppeteerChrome) {
+              resizeLaunchOptions.executablePath = puppeteerChrome;
+            }
+          }
+
+          browser = await puppeteer.launch(resizeLaunchOptions);
           
           page = await browser.newPage();
           
@@ -270,8 +285,8 @@ router.post('/', async (req, res) => {
     await db.run('DELETE FROM reports WHERE url = ?', [normalizedUrl]);
     console.log('🗑️  Удалены старые отчеты для URL:', normalizedUrl);
 
-    // Launch browser
-    browser = await puppeteer.launch({
+    // Launch browser с правильной конфигурацией для production
+    const launchOptions: any = {
       headless: true,
       args: [
         '--no-sandbox',
@@ -279,8 +294,35 @@ router.post('/', async (req, res) => {
         '--disable-dev-shm-usage',
         '--disable-accelerated-2d-canvas',
         '--disable-gpu',
+        '--disable-software-rasterizer',
+        '--disable-extensions',
       ],
-    });
+    };
+
+    // На Render используем установленный Chrome и добавляем --single-process
+    if (process.env.NODE_ENV === 'production') {
+      // Добавляем --single-process только для production (Render)
+      launchOptions.args.push('--single-process');
+      
+      // Если Chrome установлен через puppeteer, используем его
+      const puppeteerChrome = process.env.PUPPETEER_EXECUTABLE_PATH;
+      if (puppeteerChrome) {
+        launchOptions.executablePath = puppeteerChrome;
+      } else {
+        // Пробуем найти Chrome в стандартных местах на Render
+        const chromePaths = [
+          '/opt/render/project/src/backend/node_modules/.cache/puppeteer/chrome/linux-*/chrome-linux/chrome',
+          '/usr/bin/google-chrome',
+          '/usr/bin/chromium-browser',
+          '/usr/bin/chromium',
+        ];
+        
+        // Puppeteer должен найти Chrome автоматически, но можно указать явно
+        // Оставляем пустым - puppeteer найдет сам
+      }
+    }
+
+    browser = await puppeteer.launch(launchOptions);
 
     page = await browser.newPage();
     await page.setViewport({ width: 1920, height: 1080 });
@@ -595,11 +637,27 @@ router.post('/', async (req, res) => {
     if (error instanceof Error && 
         (error.message.includes('недоступен') || 
          error.message.includes('не настроены') ||
-         error.message.includes('API ключей'))) {
+         error.message.includes('API ключей') ||
+         error.message.includes('недоступны или не настроены'))) {
       return res.status(503).json({
         error: 'AI service unavailable',
         message: error.message,
         hint: 'Проверьте настройки API ключей (HUGGINGFACE_API_KEY или OPENAI_API_KEY) в переменных окружения.',
+      });
+    }
+    
+    // Если это ошибка Puppeteer (браузер не запустился)
+    if (error instanceof Error && 
+        (error.message.includes('Browser') || 
+         error.message.includes('Chrome') ||
+         error.message.includes('puppeteer') ||
+         error.message.includes('executable'))) {
+      return res.status(500).json({
+        error: 'Browser initialization failed',
+        message: 'Не удалось запустить браузер для анализа. Попробуйте позже.',
+        hint: process.env.NODE_ENV === 'production' 
+          ? 'Проверьте, что Chrome установлен на сервере (Render).'
+          : 'Проверьте установку Puppeteer и Chrome.',
       });
     }
     
