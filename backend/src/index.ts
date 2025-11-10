@@ -62,9 +62,11 @@ app.get('/health', (req, res) => {
 });
 
 // Обработка ошибок при запуске сервера
-app.listen(PORT, () => {
+// Явно указываем 0.0.0.0, чтобы сервер был доступен извне (не только localhost)
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Server running on port ${PORT}`);
   console.log(`   Health check: http://localhost:${PORT}/health`);
+  console.log(`   External access: http://0.0.0.0:${PORT}/health`);
 }).on('error', (error: any) => {
   console.error('❌ Ошибка при запуске сервера:', error);
   if (error.code === 'EADDRINUSE') {
