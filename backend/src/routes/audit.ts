@@ -31,6 +31,43 @@ function findChromePath(): string | null {
   // Определяем, где запущен сервер (Render или VPS)
   const isRender = process.env.RENDER === 'true' || existsSync('/opt/render');
   
+  // Для VPS проверяем стандартный путь Puppeteer (~/.cache/puppeteer/chrome)
+  if (!isRender) {
+    const homeDir = process.env.HOME || '/root';
+    const defaultPuppeteerCache = join(homeDir, '.cache', 'puppeteer', 'chrome');
+    console.log('   Проверяю стандартный путь Puppeteer для VPS:', defaultPuppeteerCache);
+    console.log('   Путь существует:', existsSync(defaultPuppeteerCache));
+    
+    if (existsSync(defaultPuppeteerCache)) {
+      try {
+        const versions = readdirSync(defaultPuppeteerCache);
+        console.log('   Найдено версий Chrome в стандартном кеше:', versions.length, versions);
+        
+        for (const version of versions) {
+          if (version.startsWith('linux-')) {
+            console.log('   Проверяю версию:', version);
+            const possiblePaths = [
+              join(defaultPuppeteerCache, version, 'chrome-linux64', 'chrome'),
+              join(defaultPuppeteerCache, version, 'chrome-linux', 'chrome'),
+              join(defaultPuppeteerCache, version, 'chrome', 'chrome'),
+            ];
+            
+            for (const path of possiblePaths) {
+              console.log('     Проверяю путь:', path);
+              console.log('     Существует:', existsSync(path));
+              if (existsSync(path)) {
+                console.log('✅ Найден Chrome по стандартному пути Puppeteer:', path);
+                return path;
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('❌ Ошибка при поиске Chrome в стандартном кеше:', error);
+      }
+    }
+  }
+  
   // Пробуем найти Chrome в кеше Puppeteer на Render или VPS
   // Сначала проверяем директорию проекта (сохраняется между build и runtime)
   const projectCacheDir = isRender 
