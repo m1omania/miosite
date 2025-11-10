@@ -194,30 +194,137 @@ router.post('/', async (req, res) => {
     // Parse HTML and get metrics
     const metrics = await parseHTML(page, loadTime);
 
-    // Для анализа AI используем только viewport (видимую область) - как было раньше
-    // Это быстрее и надежнее для API
-    await page.setViewport({ width: 1280, height: 720 });
-    await new Promise(resolve => setTimeout(resolve, 500)); // Даем время на рендеринг
-    
-    const desktopScreenshotForAI = await page.screenshot({
-      type: 'jpeg', // JPEG меньше размер чем PNG
-      quality: 85, // Качество для хорошего распознавания
-      fullPage: false, // ТОЛЬКО viewport - видимая область (как было раньше)
-      encoding: 'base64',
-    }) as string;
+    // Функция для создания адаптивного скриншота с постепенным снижением качества
+    const createAdaptiveScreenshot = async (maxSizeMB: number = 8): Promise<string> => {
+      // Адаптируем настройки в зависимости от требуемого размера
+      const isSmallLimit = maxSizeMB <= 2; // Для малых лимитов (1-2MB) используем более агрессивные настройки
+      const qualitySteps = isSmallLimit ? [60, 45, 35, 25] : [85, 75, 60, 45];
+      const widthSteps = isSmallLimit ? [1280, 1024, 800] : [1600, 1280, 1024];
+      const maxHeight = isSmallLimit ? 2000 : 3000; // Для малых лимитов обрезаем более агрессивно
+      
+      console.log('📸 Создаю адаптивный скриншот для AI анализа...');
+      console.log('   Максимальный размер:', maxSizeMB, 'MB');
+      console.log('   Режим:', isSmallLimit ? 'агрессивный (малый лимит)' : 'стандартный');
+      
+      // Сначала получаем размеры страницы для полного скриншота
+      const pageHeight = await page.evaluate(() => {
+        return Math.max(
+          document.body.scrollHeight,
+          document.body.offsetHeight,
+          document.documentElement.clientHeight,
+          document.documentElement.scrollHeight,
+          document.documentElement.offsetHeight
+        );
+      });
+      
+      console.log('   Высота страницы:', pageHeight, 'px');
+      
+      // Пробуем разные настройки качества
+      for (const quality of qualitySteps) {
+        console.log(`   Пробую качество ${quality}%...`);
+        
+        const screenshot = await page.screenshot({
+          type: 'jpeg',
+          quality: quality,
+          fullPage: true, // Полный скриншот страницы
+          encoding: 'base64',
+        }) as string;
 
-    // Для отображения пользователю делаем полный скриншот страницы
+        // Проверяем размер base64 (примерно 4/3 от реального размера)
+        const base64Size = screenshot.length;
+        const estimatedSizeMB = (base64Size * 3) / 4 / 1024 / 1024;
+        
+        console.log(`   Размер base64: ${(base64Size / 1024).toFixed(2)} KB (примерно ${estimatedSizeMB.toFixed(2)} MB изображения)`);
+        
+        // Если размер приемлемый, возвращаем
+        if (estimatedSizeMB <= maxSizeMB) {
+          console.log(`✅ Скриншот создан с качеством ${quality}% (размер в пределах лимита)`);
+          return screenshot;
+        }
+        
+        console.log(`   ⚠️ Размер превышает лимит, пробую меньшее качество...`);
+      }
+      
+      // Если даже с минимальным качеством размер большой, пробуем снизить разрешение (ширину)
+      console.log('   ⚠️ Даже с минимальным качеством размер большой, пробую снизить разрешение...');
+      const minQuality = qualitySteps[qualitySteps.length - 1];
+      
+      for (const width of widthSteps) {
+        console.log(`   Пробую ширину ${width}px с качеством ${minQuality}% (полная страница)...`);
+        
+        // Временно меняем viewport для уменьшения разрешения
+        await page.setViewport({ width: width, height: 1080 });
+        await new Promise(resolve => setTimeout(resolve, 500)); // Даем время на перерисовку
+        
+        const screenshot = await page.screenshot({
+          type: 'jpeg',
+          quality: minQuality,
+          fullPage: true, // ВСЕГДА полная страница, даже при уменьшенном разрешении
+          encoding: 'base64',
+        }) as string;
+        
+        // Восстанавливаем viewport
+        await page.setViewport({ width: 1920, height: 1080 });
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        const base64Size = screenshot.length;
+        const estimatedSizeMB = (base64Size * 3) / 4 / 1024 / 1024;
+        
+        console.log(`   Размер base64: ${(base64Size / 1024).toFixed(2)} KB (примерно ${estimatedSizeMB.toFixed(2)} MB изображения)`);
+        
+        if (estimatedSizeMB <= maxSizeMB) {
+          console.log(`✅ Скриншот создан с шириной ${width}px и качеством ${minQuality}% (полная страница)`);
+          return screenshot;
+        }
+      }
+      
+      // Если даже с минимальной шириной размер большой, только тогда обрезаем высоту
+      // Это крайний случай - лучше видеть верх страницы, чем ничего
+      const finalWidth = widthSteps[widthSteps.length - 1];
+      const finalQuality = Math.max(25, minQuality - 5); // Еще немного снижаем качество
+      console.log(`   ⚠️ Даже с минимальной шириной размер большой, обрезаю верх страницы ${maxHeight}px...`);
+      
+      await page.setViewport({ width: finalWidth, height: 1080 });
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      const finalScreenshot = await page.screenshot({
+        type: 'jpeg',
+        quality: finalQuality,
+        clip: {
+          x: 0,
+          y: 0,
+          width: finalWidth,
+          height: Math.min(maxHeight, pageHeight), // Обрезаем, но стараемся захватить максимум
+        },
+        encoding: 'base64',
+      }) as string;
+      
+      // Восстанавливаем viewport
+      await page.setViewport({ width: 1920, height: 1080 });
+      
+      console.log(`✅ Скриншот создан с минимальными настройками (верх ${maxHeight}px, ширина ${finalWidth}px, качество ${finalQuality}%)`);
+      return finalScreenshot;
+    };
+
+    // Устанавливаем viewport для полного скриншота
+    await page.setViewport({ width: 1920, height: 1080 });
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Создаем адаптивный скриншот для AI анализа (полная страница с автоматической оптимизацией)
+    const desktopScreenshotForAI = await createAdaptiveScreenshot(8); // Максимум 8MB
+
+    // Для отображения пользователю делаем полный скриншот страницы (PNG для лучшего качества)
     const desktopScreenshotFull = await page.screenshot({
       type: 'png',
       fullPage: true, // Полный скриншот всей страницы для отображения
       encoding: 'base64',
     }) as string;
-    
+
     // Мобильный скриншот не создается и не отправляется на анализ
     // (закомментировано для экономии ресурсов)
     /*
-    await page.setViewport({ width: 1920, height: 1080 });
-    await new Promise(resolve => setTimeout(resolve, 300));
+        await page.setViewport({ width: 1920, height: 1080 });
+        await new Promise(resolve => setTimeout(resolve, 300));
 
     await page.setViewport({ width: 375, height: 667 });
     await new Promise(resolve => setTimeout(resolve, 500));
@@ -231,18 +338,89 @@ router.post('/', async (req, res) => {
 
     const screenshots = {
       desktop: `data:image/png;base64,${desktopScreenshotFull}`,
-      // mobile: `data:image/png;base64,${mobileScreenshot}`, // Мобильный скриншот отключен
+      mobile: `data:image/png;base64,${desktopScreenshotFull}`, // Используем desktop скриншот для mobile (мобильный скриншот отключен)
     };
 
-    // Analyze with Vision API (используем viewport для быстрого и надежного анализа)
+    // Analyze with Vision API (используем полный скриншот с адаптивным качеством)
     console.log('📸 Начинаю визуальный анализ скриншота...');
-    console.log('   Использую viewport (видимую область) для анализа AI');
-    console.log('   Размер скриншота:', desktopScreenshotForAI.length, 'символов');
-    const visionAnalysis = await analyzeScreenshot(`data:image/jpeg;base64,${desktopScreenshotForAI}`);
-    console.log('✅ Визуальный анализ завершен');
-    console.log('   Найдено проблем:', visionAnalysis.issues.length);
-    console.log('   Рекомендаций:', visionAnalysis.suggestions.length);
-    console.log('   Оценка:', visionAnalysis.overallScore);
+    console.log('   Использую полный скриншот страницы (адаптивное качество)');
+    console.log('   Размер скриншота:', desktopScreenshotForAI.length, 'символов (base64)');
+    
+    let visionAnalysis: any;
+    try {
+      visionAnalysis = await analyzeScreenshot(`data:image/jpeg;base64,${desktopScreenshotForAI}`);
+      console.log('✅ Визуальный анализ завершен');
+      console.log('   Найдено проблем:', visionAnalysis.issues.length);
+      console.log('   Рекомендаций:', visionAnalysis.suggestions.length);
+      console.log('   Оценка:', visionAnalysis.overallScore);
+      console.log('   Visual Description:', visionAnalysis.visualDescription ? `есть (${visionAnalysis.visualDescription.length} символов)` : 'отсутствует');
+      console.log('   Free Form Analysis:', visionAnalysis.freeFormAnalysis ? `есть (${visionAnalysis.freeFormAnalysis.length} символов)` : 'отсутствует');
+      
+      // Проверяем, что анализ действительно выполнился
+      if (!visionAnalysis || (visionAnalysis.overallScore === 0 && !visionAnalysis.visualDescription && !visionAnalysis.freeFormAnalysis)) {
+        console.warn('⚠️  Анализ вернул пустой результат, возможно была ошибка');
+        console.warn('   Проверяю, нужно ли повторить анализ...');
+        
+        // Если анализ не выполнился, пробуем еще раз с меньшим размером
+        if (visionAnalysis && visionAnalysis.visualDescription && visionAnalysis.visualDescription.includes('недоступен')) {
+          console.log('   ⚠️ Анализ вернул ошибку, пробую повторить с меньшим размером скриншота...');
+          try {
+            const fallbackScreenshot = await createAdaptiveScreenshot(2); // Пробуем с 2MB
+            visionAnalysis = await analyzeScreenshot(`data:image/jpeg;base64,${fallbackScreenshot}`);
+            console.log('✅ Повторный анализ завершен');
+            console.log('   Найдено проблем:', visionAnalysis.issues.length);
+            console.log('   Оценка:', visionAnalysis.overallScore);
+          } catch (retryError: any) {
+            console.error('❌ Повторный анализ также не удался:', retryError.message);
+            // Продолжаем с текущим результатом
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error('❌ Ошибка при анализе скриншота:', error.message);
+      console.error('   Error type:', error.constructor.name);
+      console.error('   isSizeError:', error.isSizeError);
+      
+      // Если ошибка связана с размером, пробуем еще раз с меньшим качеством
+      if (error.isSizeError || error.message?.includes('size') || error.message?.includes('too large') || error.message?.includes('413')) {
+        console.log('   ⚠️ Изображение слишком большое (413), пробую создать скриншот с меньшим размером...');
+        
+        try {
+          // Пробуем с более агрессивными настройками - уменьшаем размер постепенно
+          let fallbackScreenshot: string | null = null;
+          const sizes = [4, 3, 2, 1]; // Пробуем размеры от 4MB до 1MB
+          
+          for (const sizeMB of sizes) {
+            console.log(`   Пробую создать скриншот размером до ${sizeMB}MB...`);
+            fallbackScreenshot = await createAdaptiveScreenshot(sizeMB);
+            const estimatedSizeMB = (fallbackScreenshot.length * 3) / 4 / 1024 / 1024;
+            console.log(`   Размер скриншота: ${estimatedSizeMB.toFixed(2)}MB`);
+            
+            try {
+              visionAnalysis = await analyzeScreenshot(`data:image/jpeg;base64,${fallbackScreenshot}`);
+              console.log('✅ Визуальный анализ завершен (с пониженным качеством)');
+              break; // Успешно проанализировали
+            } catch (retryError: any) {
+              if (retryError.isSizeError || retryError.message?.includes('413')) {
+                console.log(`   Размер ${sizeMB}MB все еще слишком большой, пробую меньше...`);
+                continue; // Пробуем следующий размер
+              } else {
+                throw retryError; // Другая ошибка - пробрасываем дальше
+              }
+            }
+          }
+          
+          if (!visionAnalysis) {
+            throw new Error('Не удалось создать скриншот подходящего размера для анализа');
+          }
+        } catch (retryError: any) {
+          console.error('❌ Не удалось проанализировать даже с минимальным размером:', retryError.message);
+          throw retryError; // Пробрасываем ошибку дальше
+        }
+      } else {
+        throw error; // Пробрасываем ошибку дальше, если это не проблема размера
+      }
+    }
 
     // Generate report
     const report = generateReport({
@@ -288,10 +466,10 @@ router.post('/', async (req, res) => {
     // Дополнительная проверка на случай если ошибка произошла до инициализации
     try {
       if (page && !page.isClosed()) {
-        await page.close();
-      }
-      if (browser) {
-        await browser.close();
+      await page.close();
+    }
+    if (browser) {
+      await browser.close();
       }
     } catch (closeError) {
       // Игнорируем ошибки при закрытии

@@ -167,7 +167,7 @@ export default function ReportDisplay({ report }: ReportDisplayProps) {
                 const lineContent = trimmedLine.replace(/\*\*/g, '');
                 const parsedContent = parseTextWithPrinciples(lineContent);
                 return (
-                  <p key={index} className="mb-3 text-gray-700">
+                  <div key={index} className="mb-3 text-gray-700">
                     {parsedContent.map((part, partIndex) => {
                       if (typeof part === 'string') {
                         return <span key={partIndex}>{part}</span>;
@@ -179,7 +179,7 @@ export default function ReportDisplay({ report }: ReportDisplayProps) {
                         );
                       }
                     })}
-                  </p>
+                  </div>
                 );
               }
             })}

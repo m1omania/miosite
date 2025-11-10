@@ -8,6 +8,7 @@ export interface HuggingFaceAnalyzeResult {
   description: string;
   success: boolean;
   freeFormAnalysis?: string; // Свободный анализ для summary
+  isSizeError?: boolean; // Флаг для ошибки размера (413)
 }
 
 /**
@@ -231,6 +232,13 @@ export async function analyzeScreenshotWithHuggingFace(base64Image: string): Pro
           success: false,
           description: 'Неверный формат запроса к Hugging Face Router API.',
         };
+      } else if (status === 413) {
+        console.error('   💡 Изображение слишком большое (Payload Too Large)');
+        return {
+          success: false,
+          description: 'Request failed with status code 413',
+          isSizeError: true, // Флаг для идентификации ошибки размера
+        };
       } else if (status === 429) {
         console.error('   💡 Превышен лимит запросов');
         return {
@@ -252,6 +260,14 @@ export async function analyzeScreenshotWithHuggingFace(base64Image: string): Pro
       };
     }
 
+    // Логируем детали ошибки для отладки
+    console.error('   Тип ошибки:', error?.constructor?.name);
+    console.error('   Код ошибки:', error?.code);
+    console.error('   Полное сообщение об ошибке:', error?.message);
+    if (error?.response?.data) {
+      console.error('   Данные ответа:', JSON.stringify(error.response.data).substring(0, 500));
+    }
+    
     return {
       success: false,
       description: error?.response?.data?.error?.message || error?.message || 'Ошибка при обращении к Hugging Face Router API.',

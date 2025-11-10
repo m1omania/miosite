@@ -206,3 +206,4 @@ OPENAI_API_KEY=sk-your-key-here
 3. **Для бесплатного решения:** Настройте Google Cloud или Azure
 
 
+

@@ -1,9 +1,7 @@
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
 import axios from 'axios';
-import { analyzeScreenshotWithYandex } from './yandexVisionService';
 import { analyzeScreenshotWithHuggingFace } from './huggingFaceVisionService';
-import { ImageAnnotatorClient } from '@google-cloud/vision';
 import { freeFormAnalysisPrompt } from './prompts/visionAnalysisPrompt.js';
 
 /**
@@ -192,30 +190,11 @@ function formatVisualDescriptionObject(obj: any): string {
 dotenv.config();
 
 let openai: OpenAI | null = null;
-let googleVisionClient: ImageAnnotatorClient | null = null;
 
 if (process.env.OPENAI_API_KEY) {
   openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   });
-}
-
-if (process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GOOGLE_CLOUD_VISION_API_KEY) {
-  try {
-    // Google Cloud Vision можно использовать двумя способами:
-    // 1. Через service account JSON (GOOGLE_APPLICATION_CREDENTIALS)
-    // 2. Через API ключ (GOOGLE_CLOUD_VISION_API_KEY) - для REST API
-    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-      googleVisionClient = new ImageAnnotatorClient({
-        keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS,
-      });
-      console.log('✅ Google Cloud Vision инициализирован через service account');
-    } else {
-      console.log('📝 Google Cloud Vision API ключ найден, будет использован REST API');
-    }
-  } catch (error) {
-    console.warn('⚠️  Не удалось инициализировать Google Cloud Vision:', error);
-  }
 }
 
 export interface VisionAnalysisIssue {
@@ -242,171 +221,7 @@ export interface VisionAnalysisResult {
   freeFormAnalysis?: string; // Свободный анализ для summary
 }
 
-async function analyzeWithGoogleVision(screenshotBase64: string): Promise<VisionAnalysisResult> {
-  console.log('🔗 Анализирую через Google Cloud Vision API...');
-  
-  try {
-    // Remove data URL prefix if present
-    const base64Image = screenshotBase64.includes(',') 
-      ? screenshotBase64.split(',')[1] 
-      : screenshotBase64;
-
-    const imageBuffer = Buffer.from(base64Image, 'base64');
-
-    let labels: string[] = [];
-    let text: string = '';
-    let safeSearch: any = null;
-
-    // Method 1: Using service account (if available)
-    if (googleVisionClient) {
-      console.log('📡 Использую Google Cloud Vision SDK...');
-      
-      const [labelResult] = await googleVisionClient.labelDetection({
-        image: { content: imageBuffer },
-      });
-      
-      const [textResult] = await googleVisionClient.textDetection({
-        image: { content: imageBuffer },
-      });
-
-      const [safeSearchResult] = await googleVisionClient.safeSearchDetection({
-        image: { content: imageBuffer },
-      });
-
-      labels = labelResult.labelAnnotations?.map(label => label.description || '') || [];
-      text = textResult.textAnnotations?.[0]?.description || '';
-      safeSearch = safeSearchResult.safeSearchAnnotation;
-    } 
-    // Method 2: Using REST API with API key
-    else if (process.env.GOOGLE_CLOUD_VISION_API_KEY) {
-      console.log('📡 Использую Google Cloud Vision REST API...');
-      
-      const apiKey = process.env.GOOGLE_CLOUD_VISION_API_KEY;
-      const requests = [
-        {
-          features: [
-            { type: 'LABEL_DETECTION', maxResults: 10 },
-            { type: 'TEXT_DETECTION', maxResults: 1 },
-            { type: 'SAFE_SEARCH_DETECTION' },
-          ],
-          image: {
-            content: base64Image,
-          },
-        },
-      ];
-
-      const response = await axios.post(
-        `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`,
-        { requests },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          timeout: 30000,
-        }
-      );
-
-      const result = response.data.responses?.[0];
-      if (result) {
-        labels = result.labelAnnotations?.map((label: any) => label.description || '') || [];
-        text = result.textAnnotations?.[0]?.description || '';
-        safeSearch = result.safeSearchAnnotation;
-      }
-    } else {
-      throw new Error('Google Cloud Vision не настроен');
-    }
-
-    console.log('📝 Получено от Google Cloud Vision:');
-    console.log(`   Меток: ${labels.length}`);
-    console.log(`   Текст: ${text ? 'найден' : 'не найден'}`);
-    console.log(`   Метки: ${labels.slice(0, 5).join(', ')}`);
-
-    // Analyze based on labels and text
-    return analyzeGoogleVisionResults(labels, text, safeSearch);
-  } catch (error) {
-    console.error('❌ Google Cloud Vision error:', error);
-    if (error instanceof Error) {
-      console.error('   Сообщение:', error.message);
-      if ('response' in error && (error as any).response) {
-        const resp = (error as any).response;
-        console.error('   Статус:', resp.status);
-        console.error('   Данные:', JSON.stringify(resp.data).substring(0, 200));
-      }
-    }
-    throw error; // Re-throw to try next API
-  }
-}
-
-function analyzeGoogleVisionResults(labels: string[], text: string, safeSearch: any): VisionAnalysisResult {
-  const issues: string[] = [];
-  const suggestions: string[] = [];
-  let score = 75;
-
-  const labelsLower = labels.map(l => l.toLowerCase()).join(' ');
-
-  // Analyze based on labels
-  if (labelsLower.includes('text') || labelsLower.includes('font')) {
-    score += 5;
-  } else {
-    issues.push('Недостаточно текстового контента на странице');
-    suggestions.push('Добавьте больше текстового контента для лучшего SEO');
-  }
-
-  if (labelsLower.includes('button') || labelsLower.includes('call to action')) {
-    score += 5;
-    suggestions.push('Найдены интерактивные элементы - хорошо для UX');
-  } else {
-    issues.push('Не обнаружено явных интерактивных элементов');
-    suggestions.push('Добавьте четкие кнопки и призывы к действию');
-  }
-
-  if (labelsLower.includes('web page') || labelsLower.includes('website')) {
-    score += 5;
-  }
-
-  if (labelsLower.includes('clutter') || labelsLower.includes('busy')) {
-    issues.push('Возможна перегруженность дизайна');
-    suggestions.push('Упростите композицию, увеличьте пробелы');
-    score -= 10;
-  }
-
-  // Analyze text content
-  if (text && text.length > 100) {
-    score += 5;
-    suggestions.push('Достаточное количество текстового контента');
-  } else if (text && text.length > 0 && text.length < 50) {
-    issues.push('Мало текстового контента на странице');
-    suggestions.push('Добавьте больше текстового контента');
-    score -= 5;
-  }
-
-  // Check safe search (if available)
-  if (safeSearch) {
-    const adult = safeSearch.adult || 'UNKNOWN';
-    const violence = safeSearch.violence || 'UNKNOWN';
-    
-    if (adult === 'LIKELY' || adult === 'VERY_LIKELY') {
-      issues.push('Обнаружен неприемлемый контент');
-      score -= 20;
-    }
-    if (violence === 'LIKELY' || violence === 'VERY_LIKELY') {
-      issues.push('Обнаружен контент с насилием');
-      score -= 20;
-    }
-  }
-
-  // If no specific issues found
-  if (issues.length === 0) {
-    issues.push('Визуальный анализ выполнен через Google Cloud Vision');
-    suggestions.push('Рекомендуется проверить визуальную иерархию и композицию вручную');
-  }
-
-  return {
-    issues,
-    suggestions: suggestions.length > 0 ? suggestions : ['Проверьте визуальную композицию'],
-    overallScore: Math.max(0, Math.min(100, score)),
-  };
-}
+// Google Cloud Vision functions removed - service no longer used
 
 // Функция analyzeWithOllama удалена - теперь используется Yandex Cloud AI Studio
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1195,76 +1010,7 @@ export async function analyzeScreenshot(screenshotBase64: string): Promise<Visio
     }
   }
   
-  // Fallback 1: Google Vision API
-  if (process.env.GOOGLE_CLOUD_VISION_API_KEY) {
-    console.log('🔄 Пробуем Google Cloud Vision API...');
-    try {
-      const googleResult = await analyzeWithGoogleVision(screenshotBase64);
-      console.log('✅ Google Cloud Vision API успешно выполнил анализ');
-      return googleResult;
-    } catch (error) {
-      console.warn('⚠️  Google Cloud Vision API недоступен:', error);
-    }
-  }
-  
-  // Fallback 2: Yandex AI Studio
-  console.log('🔄 Пробуем Yandex AI Studio...');
-  const ya = await analyzeScreenshotWithYandex(screenshotBase64);
-  if (ya.success) {
-    console.log('✅ Получен ответ от Yandex AI Studio');
-    
-    // Проверяем, не является ли это страницей с капчей
-    if (isCaptchaPage(ya.description)) {
-      console.warn('⚠️  Обнаружена страница с капчей/защитой от роботов (Yandex)');
-      return getCaptchaResponse();
-    }
-    
-    // Пытаемся распарсить JSON из ответа Yandex
-    let parsed: Partial<VisionAnalysisResult> = {};
-    const description = ya.description;
-    
-    // Пытаемся найти JSON в ответе
-    try {
-      const jsonMatch = description.match(/```json\n([\s\S]*?)\n```/) || description.match(/```\n([\s\S]*?)\n```/);
-      const jsonString = jsonMatch ? jsonMatch[1] : description;
-      
-      // Пытаемся найти JSON объект
-      const jsonObjectMatch = jsonString.match(/\{[\s\S]*\}/);
-      if (jsonObjectMatch) {
-        try {
-          parsed = JSON.parse(jsonObjectMatch[0]);
-          console.log('✅ Успешно распарсен JSON из ответа Yandex');
-        } catch (parseErr) {
-          console.warn('⚠️  Не удалось распарсить JSON, используем текстовый ответ');
-        }
-      }
-    } catch (error) {
-      console.warn('⚠️  Ошибка при парсинге JSON, используем текстовый ответ');
-    }
-    
-    // Формируем результат
-    const result: VisionAnalysisResult = {
-      issues: Array.isArray(parsed.issues) ? parsed.issues : [],
-      suggestions: Array.isArray(parsed.suggestions) 
-        ? parsed.suggestions 
-        : ['Проверьте рекомендации, сформированные на основе визуального анализа'],
-      overallScore: typeof parsed.overallScore === 'number' 
-        ? Math.max(0, Math.min(100, parsed.overallScore)) 
-        : 75,
-      visualDescription: parsed.visualDescription || description,
-    };
-    
-    console.log('✅ Yandex AI Studio анализ успешен');
-    console.log('   Найдено проблем:', result.issues.length);
-    console.log('   Рекомендаций:', result.suggestions.length);
-    console.log('   Оценка:', result.overallScore);
-    
-    return result;
-  }
-
-  console.log('❌ Ошибка Yandex AI Studio, пробуем fallback на альтернативные сервисы...');
-  
-  // Fallback 1: OpenAI Vision API
+  // Fallback: OpenAI Vision API
   if (openai && process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'your_openai_api_key_here') {
     console.log('🔄 Пробуем OpenAI Vision API...');
     try {
@@ -1276,31 +1022,17 @@ export async function analyzeScreenshot(screenshotBase64: string): Promise<Visio
     }
   }
   
-  // Fallback 2: Google Cloud Vision API
-  if (process.env.GOOGLE_CLOUD_VISION_API_KEY) {
-    console.log('🔄 Пробуем Google Cloud Vision API...');
-    try {
-      const googleResult = await analyzeWithGoogleVision(screenshotBase64);
-      console.log('✅ Google Cloud Vision API успешно выполнил анализ');
-      return googleResult;
-    } catch (error) {
-      console.warn('⚠️  Google Cloud Vision API недоступен:', error);
-    }
-  }
-  
   // Если все fallback не сработали, возвращаем сообщение об ошибке
   console.log('❌ Все сервисы vision анализа недоступны, возвращаю текстовый фоллбек');
   return {
     issues: ['Визуальный анализ через AI недоступен или произошла ошибка'],
     suggestions: [
       'Попробуйте снова позже',
-      'Проверьте настройки Yandex AI Studio в Yandex Cloud Console',
-      ya.description?.includes('не активирована') 
-        ? 'Активируйте vision модели в вашем каталоге Yandex Cloud'
-        : 'Проверьте доступность альтернативных сервисов (OpenAI, Google Vision)',
+      'Проверьте настройки Hugging Face API (HUGGINGFACE_API_KEY)',
+      'Проверьте доступность альтернативных сервисов (OpenAI Vision API)',
     ],
     overallScore: 75,
-    visualDescription: ya.description || 'Визуальный анализ недоступен. Все сервисы vision анализа (Yandex, OpenAI, Google Vision) недоступны или не настроены.',
+    visualDescription: 'Визуальный анализ недоступен. Все сервисы vision анализа (Hugging Face, OpenAI) недоступны или не настроены.',
   };
 }
 
