@@ -748,11 +748,12 @@ router.post('/', async (req, res) => {
         (error.message.includes('недоступен') || 
          error.message.includes('не настроены') ||
          error.message.includes('API ключей') ||
-         error.message.includes('недоступны или не настроены'))) {
+         error.message.includes('недоступны или не настроены') ||
+         error.message.includes('Визуальный анализ недоступен'))) {
       return res.status(503).json({
         error: 'AI service unavailable',
         message: error.message,
-        hint: 'Проверьте настройки API ключей (HUGGINGFACE_API_KEY или OPENAI_API_KEY) в переменных окружения.',
+        hint: 'Проверьте настройки API ключей (HUGGINGFACE_API_KEY или OPENAI_API_KEY) в переменных окружения Render Dashboard. Также убедитесь, что сервисы доступны (нет таймаутов или ошибок сети).',
       });
     }
     

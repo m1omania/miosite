@@ -1010,13 +1010,31 @@ export async function analyzeScreenshot(screenshotBase64: string): Promise<Visio
         (sizeError as any).isSizeError = true;
         throw sizeError;
       }
-    } catch (error) {
+    } catch (error: any) {
       // Если это ошибка размера, пробрасываем её дальше
       if (error && typeof error === 'object' && 'isSizeError' in error && (error as any).isSizeError) {
         throw error;
       }
-      console.warn('⚠️  Hugging Face Router API недоступен:', error);
+      
+      // Проверяем тип ошибки
+      if (error?.code === 'ECONNABORTED' || error?.message?.includes('timeout') || error?.message?.includes('TIMEOUT')) {
+        console.error('❌ Hugging Face Router API: таймаут запроса (превышено время ожидания)');
+        console.error('   Это может быть из-за большого размера изображения или медленного ответа API');
+      } else if (error?.response?.status === 401 || error?.response?.status === 403) {
+        console.error('❌ Hugging Face Router API: ошибка аутентификации');
+        console.error('   Проверьте правильность HUGGINGFACE_API_KEY');
+      } else if (error?.response?.status === 429) {
+        console.error('❌ Hugging Face Router API: превышен лимит запросов');
+        console.error('   Попробуйте позже или используйте другой API ключ');
+      } else if (error?.response?.status >= 500) {
+        console.error('❌ Hugging Face Router API: внутренняя ошибка сервера');
+        console.error('   Сервис временно недоступен, попробуйте позже');
+      } else {
+        console.warn('⚠️  Hugging Face Router API недоступен:', error?.message || error);
+      }
     }
+  } else {
+    console.warn('⚠️  Hugging Face API ключ не установлен (HUGGINGFACE_API_KEY)');
   }
   
   // Fallback: OpenAI Vision API
@@ -1026,14 +1044,37 @@ export async function analyzeScreenshot(screenshotBase64: string): Promise<Visio
       const openaiResult = await analyzeWithOpenAI(screenshotBase64);
       console.log('✅ OpenAI Vision API успешно выполнил анализ');
       return openaiResult;
-    } catch (error) {
-      console.warn('⚠️  OpenAI Vision API недоступен:', error);
+    } catch (error: any) {
+      if (error?.code === 'ECONNABORTED' || error?.message?.includes('timeout')) {
+        console.error('❌ OpenAI Vision API: таймаут запроса');
+      } else {
+        console.warn('⚠️  OpenAI Vision API недоступен:', error?.message || error);
+      }
     }
+  } else {
+    console.warn('⚠️  OpenAI API ключ не установлен (OPENAI_API_KEY)');
   }
   
   // Если все fallback не сработали, выбрасываем ошибку вместо мокового отчета
-  console.log('❌ Все сервисы vision анализа недоступны, выбрасываю ошибку');
-  throw new Error('Визуальный анализ недоступен. Все сервисы vision анализа (Hugging Face, OpenAI) недоступны или не настроены. Проверьте настройки API ключей.');
+  const hasHfKey = !!(process.env.HF_TOKEN || process.env.HUGGINGFACE_API_KEY || process.env.HUGGINGFACE_TOKEN);
+  const hasOpenAIKey = !!(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'your_openai_api_key_here');
+  
+  console.log('❌ Все сервисы vision анализа недоступны');
+  console.log('   HUGGINGFACE_API_KEY установлен:', hasHfKey);
+  console.log('   OPENAI_API_KEY установлен:', hasOpenAIKey);
+  
+  let errorMessage = 'Визуальный анализ недоступен. ';
+  if (!hasHfKey && !hasOpenAIKey) {
+    errorMessage += 'Не установлены API ключи. Установите HUGGINGFACE_API_KEY или OPENAI_API_KEY в переменных окружения.';
+  } else if (hasHfKey && !hasOpenAIKey) {
+    errorMessage += 'Hugging Face API недоступен или вернул ошибку. Проверьте правильность HUGGINGFACE_API_KEY и доступность сервиса.';
+  } else if (!hasHfKey && hasOpenAIKey) {
+    errorMessage += 'OpenAI API недоступен или вернул ошибку. Проверьте правильность OPENAI_API_KEY и доступность сервиса.';
+  } else {
+    errorMessage += 'Все сервисы vision анализа (Hugging Face, OpenAI) недоступны или вернули ошибку. Проверьте настройки API ключей и доступность сервисов.';
+  }
+  
+  throw new Error(errorMessage);
 }
 
 async function analyzeWithOpenAI(screenshotBase64: string): Promise<VisionAnalysisResult> {
