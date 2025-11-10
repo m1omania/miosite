@@ -8,8 +8,16 @@ import { initDatabase } from '../database/db.js';
 
 dotenv.config();
 
+console.log('🚀 Запуск сервера...');
+console.log('   NODE_ENV:', process.env.NODE_ENV || 'не установлен');
+console.log('   PORT:', process.env.PORT || 'не установлен (будет использован 4001)');
+console.log('   CORS_ORIGIN:', process.env.CORS_ORIGIN || 'не установлен (будут использованы значения по умолчанию)');
+
 // Initialize database on startup
-initDatabase().catch(console.error);
+initDatabase().catch((error) => {
+  console.error('❌ Ошибка при инициализации базы данных:', error);
+  // Не останавливаем сервер, база данных инициализируется при первом запросе
+});
 
 const app = express();
 const PORT = process.env.PORT || 4001;
@@ -53,7 +61,27 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Обработка ошибок при запуске сервера
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`   Health check: http://localhost:${PORT}/health`);
+}).on('error', (error: any) => {
+  console.error('❌ Ошибка при запуске сервера:', error);
+  if (error.code === 'EADDRINUSE') {
+    console.error(`   Порт ${PORT} уже занят. Попробуйте использовать другой порт.`);
+  }
+  process.exit(1);
+});
+
+// Обработка необработанных ошибок
+process.on('uncaughtException', (error) => {
+  console.error('❌ Необработанное исключение:', error);
+  // Не завершаем процесс, чтобы сервер продолжал работать
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Необработанный rejection:', reason);
+  console.error('   Promise:', promise);
+  // Не завершаем процесс, чтобы сервер продолжал работать
 });
 
