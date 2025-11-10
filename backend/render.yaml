@@ -12,6 +12,10 @@ services:
         value: 10000
       - key: DATABASE_PATH
         value: /opt/render/project/src/database.sqlite
+      # Добавьте эти переменные вручную в Render Dashboard:
+      # - OPENAI_API_KEY (опционально)
+      # - HUGGINGFACE_API_KEY (рекомендуется)
+      # - CORS_ORIGIN (URL вашего frontend на Vercel)
     healthCheckPath: /health
 
 

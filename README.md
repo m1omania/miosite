@@ -106,22 +106,42 @@ NEXT_PUBLIC_API_URL=http://localhost:3001
 
 ## Деплой
 
-### Vercel (Frontend)
+### Vercel (Frontend) ✅
 
-1. Подключите репозиторий к Vercel
-2. Установите переменную окружения `NEXT_PUBLIC_API_URL`
-3. Деплой автоматический при push в main
+1. Подключите репозиторий к Vercel: https://vercel.com
+2. Выберите папку `frontend` как Root Directory
+3. Установите переменные окружения:
+   - `NEXT_PUBLIC_API_URL` - URL вашего backend на Render (например: `https://ux-audit-backend.onrender.com`)
+4. Деплой автоматический при push в main
 
-### Render (Backend)
+**Настройки Vercel:**
+- Framework Preset: Next.js
+- Root Directory: `frontend`
+- Build Command: `npm run build` (автоматически)
+- Output Directory: `.next` (автоматически)
 
-1. Создайте новый Web Service
-2. Подключите репозиторий
-3. Build Command: `cd backend && npm install && npm run build`
-4. Start Command: `cd backend && npm start`
-5. Установите переменные окружения:
-   - `OPENAI_API_KEY`
-   - `CORS_ORIGIN` (URL вашего frontend)
-   - `DATABASE_PATH` (по умолчанию `./database.sqlite`)
+### Render (Backend) ✅
+
+1. Создайте новый Web Service на Render: https://render.com
+2. Подключите репозиторий GitHub
+3. Настройки:
+   - **Name:** `ux-audit-backend`
+   - **Environment:** Node
+   - **Build Command:** `cd backend && npm install && npm run build`
+   - **Start Command:** `cd backend && npm start`
+   - **Plan:** Free (или выберите нужный)
+4. Установите переменные окружения:
+   - `NODE_ENV=production`
+   - `PORT=10000` (Render автоматически устанавливает PORT, но можно указать явно)
+   - `OPENAI_API_KEY` - ваш ключ OpenAI (опционально)
+   - `HUGGINGFACE_API_KEY` - ваш токен Hugging Face (опционально, но рекомендуется)
+   - `CORS_ORIGIN` - URL вашего frontend на Vercel (например: `https://your-app.vercel.app`)
+   - `DATABASE_PATH=/opt/render/project/src/database.sqlite` (для Render)
+
+**Важно:**
+- После деплоя backend получит URL вида: `https://ux-audit-backend.onrender.com`
+- Обновите `NEXT_PUBLIC_API_URL` в Vercel на этот URL
+- Render может "засыпать" на free плане после 15 минут бездействия (первый запрос будет медленным)
 
 ## Разработка
 
