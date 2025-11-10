@@ -30,9 +30,8 @@ export default function LeadForm({ reportId, onSuccess, onError }: LeadFormProps
     setLoading(true);
 
     try {
-      // Используем относительный путь для проксирования через Vercel
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-      const apiEndpoint = apiUrl ? `${apiUrl}/api/leads` : '/api/leads';
+      // Всегда используем относительный путь через Next.js API routes
+      const apiEndpoint = '/api/leads';
       const response = await fetch(apiEndpoint, {
         method: 'POST',
         headers: {

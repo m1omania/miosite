@@ -229,10 +229,9 @@ export default function AuditForm({ onAuditStart, onAuditComplete, onError }: Au
     onAuditStart();
 
     try {
-      // Используем относительный путь для проксирования через Vercel
-      // Если NEXT_PUBLIC_API_URL указан, используем его, иначе используем относительный путь
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-      const apiEndpoint = apiUrl ? `${apiUrl}/api/audit` : '/api/audit';
+      // Всегда используем относительный путь через Next.js API routes
+      // API routes проксируют запросы на backend на серверной стороне
+      const apiEndpoint = '/api/audit';
       
       let body: any;
       let headers: Record<string, string> = {};
