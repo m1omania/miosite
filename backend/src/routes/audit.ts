@@ -594,7 +594,8 @@ router.post('/', async (req, res) => {
       // Это крайний случай - лучше видеть верх страницы, чем ничего
       const finalWidth = widthSteps[widthSteps.length - 1];
       const finalQuality = Math.max(25, minQuality - 5); // Еще немного снижаем качество
-      console.log(`   ⚠️ Даже с минимальной шириной размер большой, обрезаю верх страницы ${maxHeight}px...`);
+      const finalHeight = shouldClip ? Math.min(screenshotHeight, 5000) : Math.min(maxHeight, pageHeight);
+      console.log(`   ⚠️ Даже с минимальной шириной размер большой, обрезаю верх страницы ${finalHeight}px...`);
       
       await page.setViewport({ width: finalWidth, height: 1080 });
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -606,7 +607,7 @@ router.post('/', async (req, res) => {
           x: 0,
           y: 0,
           width: finalWidth,
-          height: Math.min(maxHeight, pageHeight), // Обрезаем, но стараемся захватить максимум
+          height: finalHeight, // Обрезаем, но стараемся захватить максимум
         },
         encoding: 'base64',
       }) as string;
