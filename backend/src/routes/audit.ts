@@ -666,8 +666,27 @@ router.post('/', async (req, res) => {
       throw loadError;
     }
     const loadTime = Date.now() - startTime;
-    // Wait for page to stabilize
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Ждем полной загрузки и выполнения скриптов
+    console.log('⏳ Жду полной загрузки страницы и выполнения скриптов...');
+    try {
+      // Ждем, пока document.readyState станет 'complete'
+      await page.waitForFunction(
+        () => document.readyState === 'complete',
+        { timeout: 10000 }
+      ).catch(() => {
+        console.warn('⚠️  document.readyState не стал complete за 10 сек, продолжаю...');
+      });
+      
+      // Дополнительное ожидание для динамического контента (React, Vue и т.д.)
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      console.log('✅ Страница полностью загружена и готова к скриншоту');
+    } catch (error) {
+      console.warn('⚠️  Ошибка при ожидании полной загрузки:', error);
+      // Продолжаем работу даже если проверка не прошла
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
 
     // Parse HTML and get metrics
     const metrics = await parseHTML(page, loadTime);
