@@ -512,18 +512,60 @@ router.post('/', async (req, res) => {
       ],
     };
 
-    // На Render используем установленный Chrome и добавляем --single-process
-    if (process.env.NODE_ENV === 'production') {
-      // Добавляем --single-process только для production (Render)
+    // Определяем, где запущен сервер (Render или VPS)
+    const isRender = process.env.RENDER === 'true' || existsSync('/opt/render');
+    const isVPS = !isRender && process.env.NODE_ENV === 'production';
+    
+    if (isRender) {
+      // На Render всегда используем --single-process (ограниченные ресурсы)
       launchOptions.args.push('--single-process');
       
-      // Пробуем найти Chrome
       const chromePath = findChromePath();
       if (chromePath) {
         launchOptions.executablePath = chromePath;
         console.log('🔧 Использую Chrome по пути:', chromePath);
       } else {
         console.warn('⚠️  Chrome не найден, Puppeteer попытается найти его автоматически');
+      }
+    } else if (isVPS) {
+      // На VPS добавляем оптимизации для снижения нагрузки
+      launchOptions.args.push(
+        '--disable-background-networking',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-breakpad',
+        '--disable-client-side-phishing-detection',
+        '--disable-component-update',
+        '--disable-default-apps',
+        '--disable-features=TranslateUI',
+        '--disable-hang-monitor',
+        '--disable-ipc-flooding-protection',
+        '--disable-popup-blocking',
+        '--disable-prompt-on-repost',
+        '--disable-renderer-backgrounding',
+        '--disable-sync',
+        '--disable-translate',
+        '--metrics-recording-only',
+        '--no-first-run',
+        '--safebrowsing-disable-auto-update',
+        '--enable-automation',
+        '--password-store=basic',
+        '--use-mock-keychain',
+        '--memory-pressure-off',
+        '--max_old_space_size=512',
+      );
+      
+      // На VPS используем --single-process только если явно указано в USE_SINGLE_PROCESS
+      const useSingleProcess = process.env.USE_SINGLE_PROCESS === 'true';
+      if (useSingleProcess) {
+        launchOptions.args.push('--single-process');
+        console.log('🔧 Использую --single-process для снижения нагрузки на VPS');
+      }
+      
+      const chromePath = findChromePath();
+      if (chromePath) {
+        launchOptions.executablePath = chromePath;
+        console.log('🔧 Использую Chrome по пути:', chromePath);
       }
     }
 
@@ -667,26 +709,12 @@ router.post('/', async (req, res) => {
     }
     const loadTime = Date.now() - startTime;
     
-    // Ждем полной загрузки и выполнения скриптов
-    console.log('⏳ Жду полной загрузки страницы и выполнения скриптов...');
-    try {
-      // Ждем, пока document.readyState станет 'complete'
-      await page.waitForFunction(
-        () => document.readyState === 'complete',
-        { timeout: 10000 }
-      ).catch(() => {
-        console.warn('⚠️  document.readyState не стал complete за 10 сек, продолжаю...');
-      });
-      
-      // Дополнительное ожидание для динамического контента (React, Vue и т.д.)
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      console.log('✅ Страница полностью загружена и готова к скриншоту');
-    } catch (error) {
-      console.warn('⚠️  Ошибка при ожидании полной загрузки:', error);
-      // Продолжаем работу даже если проверка не прошла
-      await new Promise(resolve => setTimeout(resolve, 2000));
-    }
+    // Ждем стабилизации страницы (оптимизировано для снижения нагрузки)
+    console.log('⏳ Жду стабилизации страницы...');
+    // Уменьшено время ожидания для снижения нагрузки на CPU
+    // Используем простой setTimeout вместо waitForFunction для экономии ресурсов
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    console.log('✅ Страница готова к скриншоту');
 
     // Parse HTML and get metrics
     const metrics = await parseHTML(page, loadTime);
@@ -924,6 +952,21 @@ router.post('/', async (req, res) => {
       'INSERT INTO reports (id, url, report_data) VALUES (?, ?, ?)',
       [report.id, normalizedUrl, JSON.stringify(report)]
     );
+
+    // Принудительно закрываем браузер после успешного запроса для освобождения ресурсов
+    try {
+      if (page) {
+        await page.close().catch(() => {});
+      }
+      if (browser) {
+        // Закрываем все страницы перед закрытием браузера
+        const pages = await browser.pages();
+        await Promise.all(pages.map(p => p.close().catch(() => {})));
+        await browser.close().catch(() => {});
+      }
+    } catch (closeError) {
+      console.warn('⚠️  Ошибка при закрытии браузера:', closeError);
+    }
 
     res.json({ reportId: report.id, report });
   } catch (error) {

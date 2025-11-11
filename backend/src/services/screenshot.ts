@@ -306,26 +306,11 @@ export async function takeScreenshot(url: string): Promise<ScreenshotResult> {
     });
     const loadTime = Date.now() - startTime;
 
-    // Ждем полной загрузки и выполнения скриптов перед скриншотом
-    console.log('⏳ Жду полной загрузки страницы для скриншота...');
-    try {
-      // Ждем, пока document.readyState станет 'complete'
-      await page.waitForFunction(
-        () => document.readyState === 'complete',
-        { timeout: 10000 }
-      ).catch(() => {
-        console.warn('⚠️  document.readyState не стал complete за 10 сек, продолжаю...');
-      });
-      
-      // Дополнительное ожидание для динамического контента (React, Vue и т.д.)
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      console.log('✅ Страница полностью загружена, делаю скриншот');
-    } catch (error) {
-      console.warn('⚠️  Ошибка при ожидании полной загрузки:', error);
-      // Продолжаем работу даже если проверка не прошла
-      await new Promise(resolve => setTimeout(resolve, 2000));
-    }
+    // Ждем стабилизации страницы (оптимизировано для снижения нагрузки)
+    console.log('⏳ Жду стабилизации страницы для скриншота...');
+    // Уменьшено время ожидания для снижения нагрузки на CPU
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    console.log('✅ Страница готова к скриншоту');
 
     // Take desktop screenshot (viewport only for speed)
     const desktopScreenshot = await page.screenshot({
@@ -336,8 +321,8 @@ export async function takeScreenshot(url: string): Promise<ScreenshotResult> {
 
     // Set mobile viewport
     await page.setViewport({ width: 375, height: 667 });
-    // Ждем перерисовки и загрузки контента для мобильного вида
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Ждем перерисовки (уменьшено время для снижения нагрузки)
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     // Take mobile screenshot (viewport only for speed)
     const mobileScreenshot = await page.screenshot({
@@ -398,16 +383,8 @@ export async function getPageMetrics(url: string): Promise<{ loadTime: number; h
     });
     const loadTime = Date.now() - startTime;
 
-    // Ждем полной загрузки перед получением HTML
-    try {
-      await page.waitForFunction(
-        () => document.readyState === 'complete',
-        { timeout: 10000 }
-      ).catch(() => {});
-      await new Promise(resolve => setTimeout(resolve, 2000));
-    } catch (error) {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-    }
+    // Ждем стабилизации страницы (оптимизировано)
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     const html = await page.content();
 
