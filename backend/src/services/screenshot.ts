@@ -1,7 +1,5 @@
-import puppeteer, { Browser, Page } from 'puppeteer';
+import { chromium, Browser, Page } from 'playwright';
 import { existsSync } from 'fs';
-import { readdirSync } from 'fs';
-import { join } from 'path';
 
 export interface ScreenshotResult {
   desktop: string; // base64
@@ -11,159 +9,42 @@ export interface ScreenshotResult {
 let browserInstance: Browser | null = null;
 
 /**
- * Находит путь к Chrome (на Render или VPS)
+ * Находит путь к Chrome для Playwright (опционально)
+ * Playwright обычно сам управляет браузерами, но можно указать путь
  */
-function findChromePath(): string | null {
-  console.log('🔍 Ищу Chrome...');
-  console.log('   PUPPETEER_EXECUTABLE_PATH:', process.env.PUPPETEER_EXECUTABLE_PATH || 'не установлен');
-  console.log('   PUPPETEER_CACHE_DIR:', process.env.PUPPETEER_CACHE_DIR || 'не установлен');
+function findChromePath(): string | undefined {
+  console.log('🔍 Ищу Chrome для Playwright...');
   
   // Если указан явный путь, используем его
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-    console.log('✅ Использую явный путь:', process.env.PUPPETEER_EXECUTABLE_PATH);
-    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH) {
+    console.log('✅ Использую явный путь:', process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH);
+    return process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
   }
 
   // Определяем, где запущен сервер (Render или VPS)
   const isRender = process.env.RENDER === 'true' || existsSync('/opt/render');
   
-  // Для VPS проверяем стандартный путь Puppeteer (~/.cache/puppeteer/chrome)
+  // Playwright обычно сам управляет браузерами через npx playwright install
+  // Но можно указать путь, если браузер установлен вручную
   if (!isRender) {
-    const homeDir = process.env.HOME || '/root';
-    const defaultPuppeteerCache = join(homeDir, '.cache', 'puppeteer', 'chrome');
-    console.log('   Проверяю стандартный путь Puppeteer для VPS:', defaultPuppeteerCache);
-    console.log('   Путь существует:', existsSync(defaultPuppeteerCache));
-    
-    if (existsSync(defaultPuppeteerCache)) {
-      try {
-        const versions = readdirSync(defaultPuppeteerCache);
-        console.log('   Найдено версий Chrome в стандартном кеше:', versions.length, versions);
-        
-        for (const version of versions) {
-          if (version.startsWith('linux-')) {
-            console.log('   Проверяю версию:', version);
-            const possiblePaths = [
-              join(defaultPuppeteerCache, version, 'chrome-linux64', 'chrome'),
-              join(defaultPuppeteerCache, version, 'chrome-linux', 'chrome'),
-              join(defaultPuppeteerCache, version, 'chrome', 'chrome'),
-            ];
-            
-            for (const path of possiblePaths) {
-              console.log('     Проверяю путь:', path);
-              console.log('     Существует:', existsSync(path));
-              if (existsSync(path)) {
-                console.log('✅ Найден Chrome по стандартному пути Puppeteer:', path);
-                return path;
-              }
-            }
-          }
-        }
-      } catch (error) {
-        console.error('❌ Ошибка при поиске Chrome в стандартном кеше:', error);
-      }
-    }
-  }
-  
-  // Пробуем найти Chrome в кеше Puppeteer на Render
-  // Сначала проверяем директорию проекта (сохраняется между build и runtime)
-  const projectCacheDir = isRender 
-    ? '/opt/render/project/src/backend/.local-chromium'
-    : process.env.PUPPETEER_CACHE_DIR || join(process.cwd(), '.local-chromium');
-  const projectChromePath = join(projectCacheDir, 'chrome');
-  
-  console.log('   Проверяю путь к Chrome в проекте:', projectChromePath);
-  console.log('   Путь существует:', existsSync(projectChromePath));
-  
-  if (existsSync(projectChromePath)) {
-    try {
-      const versions = readdirSync(projectChromePath);
-      console.log('   Найдено версий Chrome в проекте:', versions.length, versions);
-      
-      for (const version of versions) {
-        if (version.startsWith('linux-')) {
-          console.log('   Проверяю версию:', version);
-          const possiblePaths = [
-            join(projectChromePath, version, 'chrome-linux64', 'chrome'),
-            join(projectChromePath, version, 'chrome-linux', 'chrome'),
-            join(projectChromePath, version, 'chrome', 'chrome'),
-          ];
-          
-          for (const path of possiblePaths) {
-            console.log('     Проверяю путь:', path);
-            console.log('     Существует:', existsSync(path));
-            if (existsSync(path)) {
-              console.log('✅ Найден Chrome по пути:', path);
-              return path;
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error('❌ Ошибка при поиске Chrome в проекте:', error);
-    }
-  }
-  
-  // Затем проверяем переменную окружения PUPPETEER_CACHE_DIR
-  const cacheDir = process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer';
-  const chromeCachePath = join(cacheDir, 'chrome');
-  
-  console.log('   Проверяю путь к кешу:', chromeCachePath);
-  console.log('   Путь существует:', existsSync(chromeCachePath));
-  
-  if (existsSync(chromeCachePath)) {
-    try {
-      // Ищем папку с версией Chrome (например, linux-127.0.6533.88)
-      const versions = readdirSync(chromeCachePath);
-      console.log('   Найдено версий Chrome:', versions.length, versions);
-      
-      for (const version of versions) {
-        if (version.startsWith('linux-')) {
-          console.log('   Проверяю версию:', version);
-          // Пробуем разные варианты структуры папок
-          const possiblePaths = [
-            join(chromeCachePath, version, 'chrome-linux64', 'chrome'),
-            join(chromeCachePath, version, 'chrome-linux', 'chrome'),
-            join(chromeCachePath, version, 'chrome', 'chrome'),
-          ];
-          
-          for (const path of possiblePaths) {
-            console.log('     Проверяю путь:', path);
-            console.log('     Существует:', existsSync(path));
-            if (existsSync(path)) {
-              console.log('✅ Найден Chrome по пути:', path);
-              return path;
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error('❌ Ошибка при поиске Chrome в кеше:', error);
-      if (error instanceof Error) {
-        console.error('   Message:', error.message);
-        console.error('   Stack:', error.stack?.substring(0, 200));
-      }
-    }
-  } else {
-    console.warn('⚠️  Путь к кешу Chrome не существует:', chromeCachePath);
-  }
+    // На VPS Playwright установит браузер автоматически при первом запуске
+    // или можно использовать системный Chrome
+    const standardPaths = [
+      '/usr/bin/google-chrome',
+      '/usr/bin/chromium-browser',
+      '/usr/bin/chromium',
+    ];
 
-  // Пробуем стандартные пути
-  const standardPaths = [
-    '/usr/bin/google-chrome',
-    '/usr/bin/chromium-browser',
-    '/usr/bin/chromium',
-  ];
-
-  console.log('   Проверяю стандартные пути...');
-  for (const path of standardPaths) {
-    if (existsSync(path)) {
-      console.log('✅ Найден Chrome по стандартному пути:', path);
-      return path;
+    for (const path of standardPaths) {
+      if (existsSync(path)) {
+        console.log('✅ Найден Chrome по стандартному пути:', path);
+        return path;
+      }
     }
   }
 
-  console.warn('⚠️  Chrome не найден ни в одном из проверенных мест');
-  return null;
+  console.log('🔧 Playwright будет использовать встроенный браузер');
+  return undefined;
 }
 
 async function getBrowser(): Promise<Browser> {
@@ -186,21 +67,16 @@ async function getBrowser(): Promise<Browser> {
     const isVPS = !isRender && process.env.NODE_ENV === 'production';
     
     if (isRender) {
-      // На Render используем установленный Chrome и добавляем --single-process
-      // (нужен из-за ограниченных ресурсов на Free tier)
+      // На Render используем --single-process для ограниченных ресурсов
       launchOptions.args.push('--single-process');
       
-      // Пробуем найти Chrome
       const chromePath = findChromePath();
       if (chromePath) {
         launchOptions.executablePath = chromePath;
         console.log('🔧 Использую Chrome по пути:', chromePath);
-      } else {
-        console.warn('⚠️  Chrome не найден, Puppeteer попытается найти его автоматически');
       }
     } else if (isVPS) {
       // На VPS оптимизируем для снижения нагрузки на CPU и память
-      // Добавляем флаги для снижения потребления ресурсов
       launchOptions.args.push(
         '--disable-background-networking',
         '--disable-background-timer-throttling',
@@ -223,41 +99,31 @@ async function getBrowser(): Promise<Browser> {
         '--enable-automation',
         '--password-store=basic',
         '--use-mock-keychain',
-        '--memory-pressure-off', // Отключаем управление памятью
-        '--max_old_space_size=512', // Ограничиваем память до 512MB
+        '--memory-pressure-off',
+        '--max_old_space_size=512',
       );
       
-      // Если ресурсов мало (2GB RAM), используем --single-process
-      // Это снизит нагрузку, но может быть медленнее
+      // На VPS используем --single-process только если явно указано
       const useSingleProcess = process.env.USE_SINGLE_PROCESS === 'true';
       if (useSingleProcess) {
         launchOptions.args.push('--single-process');
-        console.log('🔧 Использую --single-process для снижения нагрузки');
+        console.log('🔧 Использую --single-process для снижения нагрузки на VPS');
       }
       
-      // Пробуем найти Chrome в стандартных местах или через Puppeteer
       const chromePath = findChromePath();
       if (chromePath) {
         launchOptions.executablePath = chromePath;
         console.log('🔧 Использую Chrome по пути:', chromePath);
-      } else {
-        // На VPS Puppeteer должен найти Chrome автоматически
-        console.log('🔧 Puppeteer найдет Chrome автоматически');
       }
     }
 
+    // Playwright использует chromium.launch() вместо puppeteer.launch()
     try {
-      browserInstance = await puppeteer.launch(launchOptions);
+      browserInstance = await chromium.launch(launchOptions);
       
       // Обрабатываем закрытие браузера
       browserInstance.on('disconnected', () => {
         console.warn('⚠️  Browser disconnected, resetting instance');
-        browserInstance = null;
-      });
-      
-      // Обрабатываем ошибки браузера
-      browserInstance.process()?.on('error', (error) => {
-        console.error('❌ Browser process error:', error);
         browserInstance = null;
       });
       
@@ -285,18 +151,18 @@ export async function takeScreenshot(url: string): Promise<ScreenshotResult> {
     page = await browser.newPage();
 
     // Block heavy resources to speed up load
-    await page.setRequestInterception(true);
-    page.on('request', (req) => {
-      const resourceType = req.resourceType();
-      // Allow essential resources only
+    // Playwright использует page.route() вместо setRequestInterception
+    await page.route('**/*', (route) => {
+      const resourceType = route.request().resourceType();
+      // Block images, media, fonts, stylesheets
       if (resourceType === 'image' || resourceType === 'media' || resourceType === 'font' || resourceType === 'stylesheet') {
-        return req.abort();
+        return route.abort();
       }
-      return req.continue();
+      return route.continue();
     });
 
     // Set viewport for desktop
-    await page.setViewport({ width: 1920, height: 1080 });
+    await page.setViewportSize({ width: 1920, height: 1080 });
     
     // Navigate to page with timeout
     const startTime = Date.now();
@@ -308,28 +174,29 @@ export async function takeScreenshot(url: string): Promise<ScreenshotResult> {
 
     // Ждем стабилизации страницы (оптимизировано для снижения нагрузки)
     console.log('⏳ Жду стабилизации страницы для скриншота...');
-    // Уменьшено время ожидания для снижения нагрузки на CPU
+    // Playwright имеет встроенные ожидания, но для совместимости используем setTimeout
     await new Promise(resolve => setTimeout(resolve, 1500));
     console.log('✅ Страница готова к скриншоту');
 
     // Take desktop screenshot (viewport only for speed)
-    const desktopScreenshot = await page.screenshot({
+    // Playwright возвращает Buffer, нужно конвертировать в base64
+    const desktopScreenshotBuffer = await page.screenshot({
       type: 'png',
       fullPage: false,
-      encoding: 'base64',
-    }) as string;
+    });
+    const desktopScreenshot = desktopScreenshotBuffer.toString('base64');
 
     // Set mobile viewport
-    await page.setViewport({ width: 375, height: 667 });
+    await page.setViewportSize({ width: 375, height: 667 });
     // Ждем перерисовки (уменьшено время для снижения нагрузки)
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     // Take mobile screenshot (viewport only for speed)
-    const mobileScreenshot = await page.screenshot({
+    const mobileScreenshotBuffer = await page.screenshot({
       type: 'png',
       fullPage: false,
-      encoding: 'base64',
-    }) as string;
+    });
+    const mobileScreenshot = mobileScreenshotBuffer.toString('base64');
 
     return {
       desktop: `data:image/png;base64,${desktopScreenshot}`,
@@ -367,13 +234,12 @@ export async function getPageMetrics(url: string): Promise<{ loadTime: number; h
     page = await browser.newPage();
 
     // Block heavy resources to speed up load
-    await page.setRequestInterception(true);
-    page.on('request', (req) => {
-      const resourceType = req.resourceType();
+    await page.route('**/*', (route) => {
+      const resourceType = route.request().resourceType();
       if (resourceType === 'image' || resourceType === 'media' || resourceType === 'font' || resourceType === 'stylesheet') {
-        return req.abort();
+        return route.abort();
       }
-      return req.continue();
+      return route.continue();
     });
 
     const startTime = Date.now();
@@ -398,4 +264,3 @@ export async function getPageMetrics(url: string): Promise<{ loadTime: number; h
     }
   }
 }
-

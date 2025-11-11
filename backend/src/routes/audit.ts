@@ -4,9 +4,8 @@ import { parseHTML } from '../services/htmlParser.js';
 import { analyzeScreenshot } from '../services/visionAnalysis.js';
 import { generateReport } from '../services/reportGenerator.js';
 import { getDb, initDatabase } from '../../database/db.js';
-import puppeteer, { type Browser, type Page } from 'puppeteer';
-import { existsSync } from 'fs';
-import { readdirSync } from 'fs';
+import { chromium, type Browser, type Page } from 'playwright';
+import { existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 
 const router = Router();
@@ -288,7 +287,7 @@ router.post('/', async (req, res) => {
             }
           }
 
-          browser = await puppeteer.launch(resizeLaunchOptions);
+          browser = await chromium.launch(resizeLaunchOptions);
           page = await browser.newPage();
           
           // Пробуем разные настройки качества, пока не достигнем нужного размера
@@ -324,11 +323,12 @@ router.post('/', async (req, res) => {
             await new Promise(resolve => setTimeout(resolve, 500));
             
             // Делаем скриншот с уменьшенным размером
-            const resizedScreenshot = await page.screenshot({
+            // Playwright возвращает Buffer, конвертируем в base64
+            const resizedScreenshotBuffer = await page.screenshot({
               type: 'jpeg',
               quality: quality * 100,
-              encoding: 'base64',
-            }) as string;
+            });
+            const resizedScreenshot = resizedScreenshotBuffer.toString('base64');
             
             const resizedBase64Data = resizedScreenshot;
             const resizedSizeMB = (resizedBase64Data.length * 3) / 4 / 1024 / 1024;
@@ -345,11 +345,11 @@ router.post('/', async (req, res) => {
           
           if (!success) {
             // Если все попытки не помогли, используем последнее (самое маленькое) изображение
-            const lastScreenshot = await page.screenshot({
+            const lastScreenshotBuffer = await page.screenshot({
               type: 'jpeg',
               quality: 30,
-              encoding: 'base64',
-            }) as string;
+            });
+            const lastScreenshot = lastScreenshotBuffer.toString('base64');
             resizedImageDataUrl = `data:image/jpeg;base64,${lastScreenshot}`;
             estimatedSizeMB = (lastScreenshot.length * 3) / 4 / 1024 / 1024;
             console.warn(`⚠️  Не удалось уменьшить до ${MAX_SIZE_MB}MB, использую минимальный размер: ${estimatedSizeMB.toFixed(2)}MB`);
@@ -572,37 +572,37 @@ router.post('/', async (req, res) => {
     // Увеличиваем таймаут CDP-протокола, чтобы избежать Target closed/Network.enable timed out
     launchOptions.protocolTimeout = 60000;
     launchOptions.ignoreHTTPSErrors = true;
-    browser = await puppeteer.launch(launchOptions);
+    browser = await chromium.launch(launchOptions);
 
-    page = await browser.newPage();
+    // В Playwright создаем context с userAgent и headers
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+      extraHTTPHeaders: {
+        'Accept-Language': 'en-US,en;q=0.9,ru;q=0.8',
+        'Upgrade-Insecure-Requests': '1',
+      },
+      viewport: { width: 1920, height: 1080 },
+    });
+    page = await context.newPage();
     // Глобальные таймауты страницы
     page.setDefaultTimeout(45000);
     page.setDefaultNavigationTimeout(45000);
-    // Ближе к обычному браузеру
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36');
-    await page.setExtraHTTPHeaders({
-      'Accept-Language': 'en-US,en;q=0.9,ru;q=0.8',
-      'Upgrade-Insecure-Requests': '1',
-    });
-    await page.evaluateOnNewDocument(() => {
+    // Playwright использует addInitScript вместо evaluateOnNewDocument
+    await page.addInitScript(() => {
       // @ts-ignore
       Object.defineProperty(navigator, 'webdriver', { get: () => false });
     });
-    await page.setViewport({ width: 1920, height: 1080 });
+    // Viewport уже установлен в context
     // Ускоряем загрузку: блокируем тяжёлые ресурсы (разрешаем CSS для стабильности layout)
-    const enableRequestInterception = async (p: Page) => {
-      await p.setRequestInterception(true);
-      p.removeAllListeners('request');
-      p.on('request', (req) => {
-        const rt = req.resourceType();
-        // Блокируем: images, media, fonts. Разрешаем: document, script, xhr/fetch, stylesheet
-        if (rt === 'image' || rt === 'media' || rt === 'font') {
-          return req.abort();
-        }
-        return req.continue();
-      });
-    };
-    await enableRequestInterception(page as any);
+    // Playwright использует page.route() вместо setRequestInterception
+    await page.route('**/*', (route) => {
+      const resourceType = route.request().resourceType();
+      // Блокируем: images, media, fonts. Разрешаем: document, script, xhr/fetch, stylesheet
+      if (resourceType === 'image' || resourceType === 'media' || resourceType === 'font') {
+        return route.abort();
+      }
+      return route.continue();
+    });
 
     // Get page metrics and HTML
     const startTime = Date.now();
@@ -644,9 +644,14 @@ router.post('/', async (req, res) => {
           } catch {}
           page = await browser!.newPage();
           page.setDefaultTimeout(45000);
-          page.setDefaultNavigationTimeout(45000);
-          await page.setViewport({ width: 1920, height: 1080 });
-          await enableRequestInterception(page as any);
+          await page.setViewportSize({ width: 1920, height: 1080 });
+          await page.route('**/*', (route) => {
+            const resourceType = route.request().resourceType();
+            if (resourceType === 'image' || resourceType === 'media' || resourceType === 'font') {
+              return route.abort();
+            }
+            return route.continue();
+          });
           continue;
         }
         // Если не детач/таргет клоузд — выходим на следующую стратегию
@@ -679,7 +684,7 @@ router.post('/', async (req, res) => {
       try {
         console.log('📡 Пробую загрузить страницу с networkidle2 (таймаут 90 сек)...');
         await page.goto(normalizedUrl, {
-          waitUntil: 'networkidle2', // networkidle2 - ждет когда не более 2 сетевых соединений в течение 500мс
+          waitUntil: 'networkidle', // networkidle - ждет когда не более 0 сетевых соединений в течение 500мс
           timeout: 90000,
         });
         pageLoaded = true;
@@ -751,12 +756,12 @@ router.post('/', async (req, res) => {
       for (const quality of qualitySteps) {
         console.log(`   Пробую качество ${quality}%...`);
         
-        const screenshot = await page.screenshot({
+        const screenshotBuffer = await page.screenshot({
           type: 'jpeg',
           quality: quality,
-          encoding: 'base64',
           // Без fullPage - только viewport (видимая область)
-        }) as string;
+        });
+        const screenshot = screenshotBuffer.toString('base64');
 
         // Проверяем размер base64 (примерно 4/3 от реального размера)
         const base64Size = screenshot.length;
@@ -781,18 +786,18 @@ router.post('/', async (req, res) => {
         console.log(`   Пробую ширину ${width}px с качеством ${minQuality}% (viewport)...`);
         
         // Временно меняем viewport для уменьшения разрешения
-        await page.setViewport({ width: width, height: 1080 });
+        await page.setViewportSize({ width: width, height: 1080 });
         await new Promise(resolve => setTimeout(resolve, 500)); // Даем время на перерисовку
         
-        const screenshot = await page.screenshot({
+        const screenshotBuffer = await page.screenshot({
           type: 'jpeg',
           quality: minQuality,
-          encoding: 'base64',
           // Без fullPage - только viewport
-        }) as string;
+        });
+        const screenshot = screenshotBuffer.toString('base64');
         
         // Восстанавливаем viewport
-        await page.setViewport({ width: 1920, height: 1080 });
+        await page.setViewportSize({ width: 1920, height: 1080 });
         await new Promise(resolve => setTimeout(resolve, 300));
         
         const base64Size = screenshot.length;
@@ -811,25 +816,25 @@ router.post('/', async (req, res) => {
       const finalQuality = Math.max(20, minQuality - 5);
       console.log(`   ⚠️ Использую минимальные настройки: ширина ${finalWidth}px, качество ${finalQuality}%...`);
       
-      await page.setViewport({ width: finalWidth, height: 1080 });
+        await page.setViewportSize({ width: finalWidth, height: 1080 });
       await new Promise(resolve => setTimeout(resolve, 500));
       
-      const finalScreenshot = await page.screenshot({
+      const finalScreenshotBuffer = await page.screenshot({
         type: 'jpeg',
         quality: finalQuality,
-        encoding: 'base64',
         // Без fullPage - только viewport
-      }) as string;
+      });
+      const finalScreenshot = finalScreenshotBuffer.toString('base64');
       
       // Восстанавливаем viewport
-      await page.setViewport({ width: 1920, height: 1080 });
+      await page.setViewportSize({ width: 1920, height: 1080 });
       
       console.log(`✅ Скриншот viewport создан с минимальными настройками (ширина ${finalWidth}px, качество ${finalQuality}%)`);
       return finalScreenshot;
     };
 
     // Устанавливаем viewport для полного скриншота
-    await page.setViewport({ width: 1920, height: 1080 });
+    await page.setViewportSize({ width: 1920, height: 1080 });
     await new Promise(resolve => setTimeout(resolve, 500));
     
     // Создаем адаптивный скриншот для AI анализа (полная страница с автоматической оптимизацией)
@@ -837,21 +842,21 @@ router.post('/', async (req, res) => {
 
     // Для отображения пользователю делаем полный скриншот страницы (PNG для лучшего качества)
     // Скриншот viewport для отображения (быстрее, чем fullPage)
-    const desktopScreenshotFull = await page.screenshot({
+    const desktopScreenshotFullBuffer = await page.screenshot({
       type: 'png',
       // Без fullPage - только viewport (видимая область)
-      encoding: 'base64',
-    }) as string;
+    });
+    const desktopScreenshotFull = desktopScreenshotFullBuffer.toString('base64');
 
     // Мобильный скриншот - viewport (быстрее)
-    await page.setViewport({ width: 375, height: 667 });
+    await page.setViewportSize({ width: 375, height: 667 });
     await new Promise(resolve => setTimeout(resolve, 500));
 
-    const mobileScreenshot = await page.screenshot({
+    const mobileScreenshotBuffer = await page.screenshot({
       type: 'png',
       // Без fullPage - только viewport (видимая область)
-      encoding: 'base64',
-    }) as string;
+    });
+    const mobileScreenshot = mobileScreenshotBuffer.toString('base64');
 
     const screenshots = {
       desktop: `data:image/png;base64,${desktopScreenshotFull}`,
@@ -959,9 +964,9 @@ router.post('/', async (req, res) => {
         await page.close().catch(() => {});
       }
       if (browser) {
-        // Закрываем все страницы перед закрытием браузера
-        const pages = await browser.pages();
-        await Promise.all(pages.map(p => p.close().catch(() => {})));
+        // В Playwright закрываем все контексты (которые содержат страницы)
+        const contexts = browser.contexts();
+        await Promise.all(contexts.map(ctx => ctx.close().catch(() => {})));
         await browser.close().catch(() => {});
       }
     } catch (closeError) {
