@@ -184,7 +184,7 @@ export async function analyzeScreenshotWithHuggingFace(base64Image: string): Pro
           Authorization: `Bearer ${hfToken}`,
           'Content-Type': 'application/json',
         },
-        timeout: 30000,
+        timeout: 90000, // Увеличиваем таймаут для структурирования (может занять время)
       }
     );
 

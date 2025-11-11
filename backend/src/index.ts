@@ -12,6 +12,8 @@ console.log('🚀 Запуск сервера...');
 console.log('   NODE_ENV:', process.env.NODE_ENV || 'не установлен');
 console.log('   PORT:', process.env.PORT || 'не установлен (будет использован 4001)');
 console.log('   CORS_ORIGIN:', process.env.CORS_ORIGIN || 'не установлен (будут использованы значения по умолчанию)');
+console.log('   HUGGINGFACE_API_KEY:', process.env.HUGGINGFACE_API_KEY ? 'установлен (' + process.env.HUGGINGFACE_API_KEY.substring(0, 10) + '...)' : 'не установлен');
+console.log('   OPENAI_API_KEY:', process.env.OPENAI_API_KEY ? 'установлен' : 'не установлен');
 
 // Initialize database on startup
 initDatabase().catch((error) => {
