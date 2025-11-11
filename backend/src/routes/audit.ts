@@ -242,15 +242,16 @@ router.post('/', async (req, res) => {
       console.log('   Формат изображения:', imageDataUrl.substring(0, 30) + '...');
       console.log('   Размер изображения (base64 длина):', imageDataUrl.length, 'символов');
       
-      // Проверяем размер изображения (примерно 1MB лимит для Hugging Face)
+      // Проверяем размер изображения (лимит ~0.8MB для Hugging Face API)
       const base64Data = imageDataUrl.split(',')[1] || imageDataUrl;
-      const estimatedSizeMB = (base64Data.length * 3) / 4 / 1024 / 1024;
+      let estimatedSizeMB = (base64Data.length * 3) / 4 / 1024 / 1024;
       console.log('   Примерный размер изображения:', estimatedSizeMB.toFixed(2), 'MB');
       
-      // Если изображение слишком большое (>1MB), предупреждаем
-      if (estimatedSizeMB > 1.0) {
-        console.warn('⚠️  Изображение слишком большое для Hugging Face API (лимит ~1MB)');
-        console.warn('   Попробую уменьшить изображение через Puppeteer...');
+      // Если изображение слишком большое (>0.8MB), уменьшаем его
+      const MAX_SIZE_MB = 0.8; // Безопасный лимит для Hugging Face API
+      if (estimatedSizeMB > MAX_SIZE_MB) {
+        console.warn(`⚠️  Изображение слишком большое (${estimatedSizeMB.toFixed(2)}MB) для Hugging Face API (лимит ~${MAX_SIZE_MB}MB)`);
+        console.warn('   Уменьшаю изображение через Puppeteer...');
         
         try {
           // Используем Puppeteer для уменьшения изображения
@@ -288,34 +289,71 @@ router.post('/', async (req, res) => {
           }
 
           browser = await puppeteer.launch(resizeLaunchOptions);
-          
           page = await browser.newPage();
           
-          // Загружаем изображение в data URL и создаем временную страницу
-          await page.setContent(`
-            <html>
-              <body style="margin:0;padding:0;">
-                <img id="img" src="${imageDataUrl}" style="max-width:1920px;max-height:1080px;width:auto;height:auto;" />
-              </body>
-            </html>
-          `);
+          // Пробуем разные настройки качества, пока не достигнем нужного размера
+          const qualityLevels = [0.7, 0.6, 0.5, 0.4, 0.3];
+          const maxDimensions = [
+            { width: 1920, height: 1080 },
+            { width: 1600, height: 900 },
+            { width: 1280, height: 720 },
+            { width: 1024, height: 576 },
+            { width: 800, height: 450 },
+          ];
           
-          // Ждем загрузки изображения
-          await page.waitForSelector('#img');
-          await new Promise(resolve => setTimeout(resolve, 500));
+          let resizedImageDataUrl = imageDataUrl;
+          let success = false;
           
-          // Делаем скриншот с уменьшенным размером
-          const resizedScreenshot = await page.screenshot({
-            type: 'jpeg',
-            quality: 75,
-            encoding: 'base64',
-          }) as string;
+          for (let i = 0; i < qualityLevels.length && !success; i++) {
+            const quality = qualityLevels[i];
+            const dims = maxDimensions[i];
+            
+            console.log(`   Пробую качество ${(quality * 100).toFixed(0)}%, размер ${dims.width}x${dims.height}...`);
+            
+            // Загружаем изображение в data URL и создаем временную страницу
+            await page.setContent(`
+              <html>
+                <body style="margin:0;padding:0;">
+                  <img id="img" src="${imageDataUrl}" style="max-width:${dims.width}px;max-height:${dims.height}px;width:auto;height:auto;" />
+                </body>
+              </html>
+            `);
+            
+            // Ждем загрузки изображения
+            await page.waitForSelector('#img');
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Делаем скриншот с уменьшенным размером
+            const resizedScreenshot = await page.screenshot({
+              type: 'jpeg',
+              quality: quality * 100,
+              encoding: 'base64',
+            }) as string;
+            
+            const resizedBase64Data = resizedScreenshot;
+            const resizedSizeMB = (resizedBase64Data.length * 3) / 4 / 1024 / 1024;
+            
+            console.log(`   Размер после сжатия: ${resizedSizeMB.toFixed(2)}MB`);
+            
+            if (resizedSizeMB <= MAX_SIZE_MB) {
+              resizedImageDataUrl = `data:image/jpeg;base64,${resizedScreenshot}`;
+              estimatedSizeMB = resizedSizeMB;
+              success = true;
+              console.log(`✅ Изображение успешно уменьшено до ${resizedSizeMB.toFixed(2)}MB`);
+            }
+          }
           
-          const resizedImageDataUrl = `data:image/jpeg;base64,${resizedScreenshot}`;
-          const resizedBase64Data = resizedScreenshot;
-          const resizedSizeMB = (resizedBase64Data.length * 3) / 4 / 1024 / 1024;
-          
-          console.log('✅ Изображение уменьшено до:', resizedSizeMB.toFixed(2), 'MB');
+          if (!success) {
+            // Если все попытки не помогли, используем последнее (самое маленькое) изображение
+            const lastScreenshot = await page.screenshot({
+              type: 'jpeg',
+              quality: 30,
+              encoding: 'base64',
+            }) as string;
+            resizedImageDataUrl = `data:image/jpeg;base64,${lastScreenshot}`;
+            estimatedSizeMB = (lastScreenshot.length * 3) / 4 / 1024 / 1024;
+            console.warn(`⚠️  Не удалось уменьшить до ${MAX_SIZE_MB}MB, использую минимальный размер: ${estimatedSizeMB.toFixed(2)}MB`);
+          }
           
           // Используем уменьшенное изображение
           imageDataUrl = resizedImageDataUrl;
@@ -327,7 +365,12 @@ router.post('/', async (req, res) => {
           page = null;
         } catch (resizeError) {
           console.error('❌ Не удалось уменьшить изображение:', resizeError);
-          // Продолжаем с оригинальным изображением
+          // Если не удалось уменьшить, возвращаем ошибку
+          return res.status(413).json({
+            error: 'Image too large',
+            message: `Изображение слишком большое (${estimatedSizeMB.toFixed(2)}MB). Не удалось автоматически уменьшить. Пожалуйста, уменьшите размер изображения до ${MAX_SIZE_MB}MB или меньше перед загрузкой.`,
+            hint: 'Попробуйте сжать изображение или уменьшить его разрешение до 1280x720 или меньше.',
+          });
         }
       }
       
@@ -484,10 +527,40 @@ router.post('/', async (req, res) => {
       }
     }
 
+    // Увеличиваем таймаут CDP-протокола, чтобы избежать Target closed/Network.enable timed out
+    launchOptions.protocolTimeout = 60000;
+    launchOptions.ignoreHTTPSErrors = true;
     browser = await puppeteer.launch(launchOptions);
 
     page = await browser.newPage();
+    // Глобальные таймауты страницы
+    page.setDefaultTimeout(45000);
+    page.setDefaultNavigationTimeout(45000);
+    // Ближе к обычному браузеру
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36');
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-US,en;q=0.9,ru;q=0.8',
+      'Upgrade-Insecure-Requests': '1',
+    });
+    await page.evaluateOnNewDocument(() => {
+      // @ts-ignore
+      Object.defineProperty(navigator, 'webdriver', { get: () => false });
+    });
     await page.setViewport({ width: 1920, height: 1080 });
+    // Ускоряем загрузку: блокируем тяжёлые ресурсы (разрешаем CSS для стабильности layout)
+    const enableRequestInterception = async (p: Page) => {
+      await p.setRequestInterception(true);
+      p.removeAllListeners('request');
+      p.on('request', (req) => {
+        const rt = req.resourceType();
+        // Блокируем: images, media, fonts. Разрешаем: document, script, xhr/fetch, stylesheet
+        if (rt === 'image' || rt === 'media' || rt === 'font') {
+          return req.abort();
+        }
+        return req.continue();
+      });
+    };
+    await enableRequestInterception(page as any);
 
     // Get page metrics and HTML
     const startTime = Date.now();
@@ -497,21 +570,45 @@ router.post('/', async (req, res) => {
     let pageLoaded = false;
     let loadError: any = null;
     
-    // Стратегия 1: Пробуем domcontentloaded (быстро, но может не сработать для медленных сайтов)
-    try {
+    // Обёртка: одна попытка загрузки страницы с domcontentloaded
+    const attemptLoad = async (p: Page) => {
       console.log('📡 Пробую загрузить страницу с domcontentloaded (таймаут 45 сек)...');
-    await page.goto(normalizedUrl, {
-      waitUntil: 'domcontentloaded',
+      await p.goto(normalizedUrl, {
+        waitUntil: 'domcontentloaded',
         timeout: 45000,
       });
-      pageLoaded = true;
-      console.log('✅ Страница загружена с domcontentloaded');
-    } catch (error: any) {
-      loadError = error;
-      if (error.name === 'TimeoutError') {
-        console.warn('⚠️  Таймаут при загрузке с domcontentloaded, пробую load...');
-      } else {
-        console.warn('⚠️  Ошибка при загрузке с domcontentloaded:', error.message);
+    };
+    // Попытка 1 + ретрай при Target closed / Frame detached
+    let attempts = 0;
+    while (!pageLoaded && attempts < 2) {
+      attempts++;
+      try {
+        await attemptLoad(page as any);
+        pageLoaded = true;
+        console.log(`✅ Страница загружена с domcontentloaded (попытка ${attempts})`);
+      } catch (error: any) {
+        loadError = error;
+        const msg = String(error?.message || '');
+        const isDetached = msg.includes('detached') || msg.includes('Target closed');
+        if (error.name === 'TimeoutError') {
+          console.warn(`⚠️  Таймаут при загрузке (попытка ${attempts}), пробую следующие стратегии...`);
+          break; // перейдём к стратегии 2/3 ниже
+        }
+        console.warn(`⚠️  Ошибка при загрузке (попытка ${attempts}):`, msg);
+        if (isDetached && attempts < 2) {
+          // Пересоздаём страницу и повторяем
+          try {
+            await page.close().catch(() => {});
+          } catch {}
+          page = await browser!.newPage();
+          page.setDefaultTimeout(45000);
+          page.setDefaultNavigationTimeout(45000);
+          await page.setViewport({ width: 1920, height: 1080 });
+          await enableRequestInterception(page as any);
+          continue;
+        }
+        // Если не детач/таргет клоузд — выходим на следующую стратегию
+        break;
       }
     }
     

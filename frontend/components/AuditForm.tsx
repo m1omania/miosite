@@ -370,6 +370,15 @@ export default function AuditForm({ onAuditStart, onAuditComplete, onError }: Au
           >
             выбрать файл
           </button>
+          <div className="mt-2 text-xs text-gray-500">
+            Требования к изображению:
+            <ul className="mt-1 space-y-0.5">
+              <li>— Форматы: JPG, PNG, WebP</li>
+              <li>— Максимальный размер файла: 10 MB (до сжатия)</li>
+              <li>— Рекомендуемое разрешение: от 1280×720; мы автоматически сжимаем до ≤ 1920×1080</li>
+              <li>— Для стабильной работы ИИ итоговое изображение ≤ ~8 MB</li>
+            </ul>
+          </div>
         </div>
       </div>
       
