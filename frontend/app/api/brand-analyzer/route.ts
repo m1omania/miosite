@@ -87,23 +87,25 @@ async function extractColorsFromImage(imageUrl: string): Promise<string[]> {
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const url = searchParams.get('url');
+    const urlParam = searchParams.get('url');
 
-    if (!url) {
+    if (!urlParam) {
       return NextResponse.json(
         { error: 'URL parameter is required' },
         { status: 400 }
       );
     }
 
-    if (!isValidUrl(url)) {
+    // Нормализуем URL перед проверкой
+    const normalizedUrl = normalizeUrl(urlParam);
+
+    if (!isValidUrl(normalizedUrl)) {
       return NextResponse.json(
         { error: 'Invalid URL format' },
         { status: 400 }
       );
     }
 
-    const normalizedUrl = normalizeUrl(url);
     const baseUrl = new URL(normalizedUrl).origin;
 
     // Fetch HTML
