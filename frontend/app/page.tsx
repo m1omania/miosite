@@ -225,6 +225,12 @@ export default function Home() {
               >
                 Анализ сложности
               </a>
+              <a
+                href="/brand-analyzer"
+                className="px-6 py-3 text-lg font-medium text-gray-600 hover:text-gray-900 transition-colors"
+              >
+                Анализ брендинга
+              </a>
             </div>
           </div>
         )}

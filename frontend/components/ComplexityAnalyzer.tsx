@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import jsPDF from 'jspdf';
 
 interface StepRating {
   context_shifts: number | null;
@@ -98,6 +99,9 @@ const dimensions = {
 };
 
 export default function ComplexityAnalyzer() {
+  const [view, setView] = useState<'home' | 'analysis' | 'reports'>('home');
+  const [currentReportId, setCurrentReportId] = useState<string | null>(null);
+  const [currentReportName, setCurrentReportName] = useState<string>('');
   const [state, setState] = useState<AppState>({
     versionA: {
       name: '',
@@ -115,6 +119,34 @@ export default function ComplexityAnalyzer() {
 
   const [activeTab, setActiveTab] = useState<'versionA' | 'versionB' | 'comparison'>('versionA');
   const [expandedSteps, setExpandedSteps] = useState<{ [key: string]: boolean }>({});
+  const [savedReports, setSavedReports] = useState<Array<{ id: string; name: string; date: string; data: AppState }>>([]);
+
+  // Загрузка сохраненных отчетов при монтировании
+  useEffect(() => {
+    const saved = localStorage.getItem('complexityReports');
+    if (saved) {
+      try {
+        setSavedReports(JSON.parse(saved));
+      } catch (e) {
+        console.error('Error loading saved reports:', e);
+      }
+    }
+  }, []);
+
+  // Автосохранение текущей оценки при изменении состояния
+  useEffect(() => {
+    if (currentReportId && view === 'analysis') {
+      setSavedReports(prevReports => {
+        const updatedReports = prevReports.map(r => 
+          r.id === currentReportId 
+            ? { ...r, data: state, date: new Date().toLocaleString('ru-RU') }
+            : r
+        );
+        localStorage.setItem('complexityReports', JSON.stringify(updatedReports));
+        return updatedReports;
+      });
+    }
+  }, [state, currentReportId, view]);
 
   const calculateStepScore = (ratings: StepRating): number => {
     let total = 0;
@@ -252,8 +284,440 @@ export default function ComplexityAnalyzer() {
     });
   };
 
+  const createNewReport = () => {
+    const newReportId = `report-${Date.now()}`;
+    const newReportName = `Оценка ${new Date().toLocaleDateString('ru-RU')}`;
+    
+    const newReport = {
+      id: newReportId,
+      name: newReportName,
+      date: new Date().toLocaleString('ru-RU'),
+      data: {
+        versionA: {
+          name: '',
+          role: '',
+          task: '',
+          steps: []
+        },
+        versionB: {
+          name: '',
+          role: '',
+          task: '',
+          steps: []
+        }
+      }
+    };
+    
+    const updatedReports = [...savedReports, newReport];
+    setSavedReports(updatedReports);
+    localStorage.setItem('complexityReports', JSON.stringify(updatedReports));
+    
+    setCurrentReportId(newReportId);
+    setCurrentReportName(newReportName);
+    setState(newReport.data);
+    setActiveTab('versionA');
+    setExpandedSteps({});
+    setView('analysis');
+  };
+
+  const loadReport = (reportId: string) => {
+    const report = savedReports.find(r => r.id === reportId);
+    if (report) {
+      setCurrentReportId(report.id);
+      setCurrentReportName(report.name);
+      setState(report.data);
+      setActiveTab('versionA');
+      setExpandedSteps({});
+      setView('analysis');
+    }
+  };
+
+  const deleteReport = (reportId: string) => {
+    if (confirm('Удалить эту оценку?')) {
+      const updatedReports = savedReports.filter(r => r.id !== reportId);
+      setSavedReports(updatedReports);
+      localStorage.setItem('complexityReports', JSON.stringify(updatedReports));
+      
+      if (currentReportId === reportId) {
+        setView('home');
+        setCurrentReportId(null);
+        setCurrentReportName('');
+        setState({
+          versionA: {
+            name: '',
+            role: '',
+            task: '',
+            steps: []
+          },
+          versionB: {
+            name: '',
+            role: '',
+            task: '',
+            steps: []
+          }
+        });
+      }
+    }
+  };
+
+  const updateReportName = (newName: string) => {
+    if (!currentReportId) return;
+    
+    setCurrentReportName(newName);
+    const updatedReports = savedReports.map(r => 
+      r.id === currentReportId 
+        ? { ...r, name: newName }
+        : r
+    );
+    setSavedReports(updatedReports);
+    localStorage.setItem('complexityReports', JSON.stringify(updatedReports));
+  };
+
+  const exportReport = () => {
+    if (!currentReportId) return;
+    
+    const report = savedReports.find(r => r.id === currentReportId);
+    if (!report) return;
+    
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 20;
+    let yPos = margin;
+    
+    // Helper function to add new page if needed
+    const checkNewPage = (requiredSpace: number) => {
+      if (yPos + requiredSpace > pageHeight - margin) {
+        doc.addPage();
+        yPos = margin;
+      }
+    };
+    
+    // Title
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Отчет по анализу сложности', pageWidth / 2, yPos, { align: 'center' });
+    yPos += 15;
+    
+    // Report name and date
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Название: ${report.name}`, margin, yPos);
+    yPos += 7;
+    doc.text(`Дата: ${report.date}`, margin, yPos);
+    yPos += 15;
+    
+    // Version A
+    checkNewPage(50);
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Версия A', margin, yPos);
+    yPos += 10;
+    
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+    if (report.data.versionA.name) {
+      doc.text(`Название: ${report.data.versionA.name}`, margin, yPos);
+      yPos += 7;
+    }
+    if (report.data.versionA.task) {
+      const taskLines = doc.splitTextToSize(`Задача: ${report.data.versionA.task}`, pageWidth - 2 * margin);
+      doc.text(taskLines, margin, yPos);
+      yPos += taskLines.length * 7;
+    }
+    
+    const versionAScore = calculateTotalScore('versionA');
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Общая сложность: ${versionAScore}`, margin, yPos);
+    yPos += 10;
+    
+    // Version A Steps
+    if (report.data.versionA.steps.length > 0) {
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Шаги:', margin, yPos);
+      yPos += 8;
+      
+      report.data.versionA.steps.forEach((step, index) => {
+        checkNewPage(20);
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        const stepScore = calculateStepScore(step.ratings);
+        doc.text(`Шаг ${index + 1}: ${step.name || `Шаг ${index + 1}`} (Сложность: ${stepScore})`, margin + 5, yPos);
+        yPos += 7;
+        
+        // Ratings
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        Object.entries(dimensions).forEach(([dimKey, dimConfig]) => {
+          const rating = step.ratings[dimKey as keyof StepRating];
+          if (rating !== null) {
+            const option = dimConfig.options.find(opt => opt.value === rating);
+            if (option) {
+              const metrics = dimConfig.metrics as Record<number, number>;
+              const value = metrics[rating] || 0;
+              checkNewPage(7);
+              doc.text(`  • ${dimConfig.label}: ${option.label} (${value})`, margin + 10, yPos);
+              yPos += 6;
+            }
+          }
+        });
+        yPos += 3;
+      });
+    }
+    
+    yPos += 10;
+    
+    // Version B (if exists)
+    if (report.data.versionB.steps.length > 0 || report.data.versionB.name || report.data.versionB.task) {
+      checkNewPage(50);
+      doc.setFontSize(16);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Версия B', margin, yPos);
+      yPos += 10;
+      
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'normal');
+      if (report.data.versionB.name) {
+        doc.text(`Название: ${report.data.versionB.name}`, margin, yPos);
+        yPos += 7;
+      }
+      if (report.data.versionB.task) {
+        const taskLines = doc.splitTextToSize(`Задача: ${report.data.versionB.task}`, pageWidth - 2 * margin);
+        doc.text(taskLines, margin, yPos);
+        yPos += taskLines.length * 7;
+      }
+      
+      const versionBScore = calculateTotalScore('versionB');
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Общая сложность: ${versionBScore}`, margin, yPos);
+      yPos += 10;
+      
+      // Version B Steps
+      if (report.data.versionB.steps.length > 0) {
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Шаги:', margin, yPos);
+        yPos += 8;
+        
+        report.data.versionB.steps.forEach((step, index) => {
+          checkNewPage(20);
+          doc.setFontSize(10);
+          doc.setFont('helvetica', 'bold');
+          const stepScore = calculateStepScore(step.ratings);
+          doc.text(`Шаг ${index + 1}: ${step.name || `Шаг ${index + 1}`} (Сложность: ${stepScore})`, margin + 5, yPos);
+          yPos += 7;
+          
+          // Ratings
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(9);
+          Object.entries(dimensions).forEach(([dimKey, dimConfig]) => {
+            const rating = step.ratings[dimKey as keyof StepRating];
+            if (rating !== null) {
+              const option = dimConfig.options.find(opt => opt.value === rating);
+              if (option) {
+                const metrics = dimConfig.metrics as Record<number, number>;
+                const value = metrics[rating] || 0;
+                checkNewPage(7);
+                doc.text(`  • ${dimConfig.label}: ${option.label} (${value})`, margin + 10, yPos);
+                yPos += 6;
+              }
+            }
+          });
+          yPos += 3;
+        });
+      }
+      
+      // Comparison
+      checkNewPage(20);
+      yPos += 10;
+      doc.setFontSize(16);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Сравнение', margin, yPos);
+      yPos += 10;
+      
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'normal');
+      const diff = versionBScore - versionAScore;
+      doc.text(`Версия A: ${versionAScore}`, margin, yPos);
+      yPos += 7;
+      doc.text(`Версия B: ${versionBScore}`, margin, yPos);
+      yPos += 7;
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Разница: ${diff > 0 ? '+' : ''}${diff}`, margin, yPos);
+    }
+    
+    // Footer
+    const totalPages = doc.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.text(
+        `Страница ${i} из ${totalPages}`,
+        pageWidth / 2,
+        pageHeight - 10,
+        { align: 'center' }
+      );
+    }
+    
+    // Save PDF
+    doc.save(`${report.name.replace(/\s+/g, '_')}.pdf`);
+  };
+
+  // Home view - только заголовок и кнопки
+  if (view === 'home') {
+    return (
+      <div className="max-w-6xl mx-auto p-6">
+        <div className="text-center">
+          <h1 className="text-4xl font-bold text-gray-900 mb-4">
+            Анализ сложности
+          </h1>
+          <p className="text-xl text-gray-600 mb-8">
+            Оценка сложности интерфейса по методике IBM Complexity Analysis
+          </p>
+          <div className="flex gap-4 justify-center">
+            <button
+              onClick={createNewReport}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+            >
+              Новая оценка
+            </button>
+            <button
+              onClick={() => setView('reports')}
+              className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-medium"
+            >
+              Мои оценки
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Reports view - список всех отчетов
+  if (view === 'reports') {
+    return (
+      <div className="max-w-6xl mx-auto p-6">
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold text-gray-900 mb-4">
+            Анализ сложности
+          </h1>
+          <p className="text-xl text-gray-600 mb-8">
+            Оценка сложности интерфейса по методике IBM Complexity Analysis
+          </p>
+          <div className="flex gap-4 justify-center mb-8">
+            <button
+              onClick={createNewReport}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+            >
+              Новая оценка
+            </button>
+            <button
+              onClick={() => setView('reports')}
+              className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-medium"
+            >
+              Мои оценки
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-md p-6">
+          <h2 className="text-2xl mb-6">Мои оценки</h2>
+          {savedReports.length === 0 ? (
+            <p className="text-gray-600 text-center py-8">Нет сохраненных оценок</p>
+          ) : (
+            <div className="space-y-3">
+              {savedReports.map((report) => (
+                <div key={report.id} className="border rounded-lg p-4 flex justify-between items-center hover:bg-gray-50 transition-colors">
+                  <div>
+                    <div className="font-medium text-lg">{report.name}</div>
+                    <div className="text-sm text-gray-600 mt-1">{report.date}</div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => loadReport(report.id)}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                      Загрузить
+                    </button>
+                    <button
+                      onClick={() => deleteReport(report.id)}
+                      className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                    >
+                      Удалить
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Analysis view - форма анализа
   return (
     <div className="max-w-6xl mx-auto p-6">
+      {/* Header with buttons */}
+      <div className="text-center mb-8">
+        <h1 className="text-4xl font-bold text-gray-900 mb-4">
+          Анализ сложности
+        </h1>
+        <p className="text-xl text-gray-600 mb-8">
+          Оценка сложности интерфейса по методике IBM Complexity Analysis
+        </p>
+        <div className="flex gap-4 justify-center mb-6">
+          <button
+            onClick={createNewReport}
+            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+          >
+            Новая оценка
+          </button>
+          <button
+            onClick={() => setView('reports')}
+            className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-medium"
+          >
+            Мои оценки
+          </button>
+        </div>
+      </div>
+
+      {/* Report controls */}
+      {currentReportId && (
+        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+          <div className="flex justify-between items-center">
+            <div className="flex-1 mr-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Название оценки
+              </label>
+              <input
+                type="text"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={currentReportName}
+                onChange={(e) => updateReportName(e.target.value)}
+                placeholder="Введите название оценки"
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={exportReport}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              >
+                Загрузить отчет
+              </button>
+              <button
+                onClick={() => deleteReport(currentReportId)}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+              >
+                Удалить оценку
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex gap-2 border-b border-gray-300 mb-6 justify-center">
         <button
