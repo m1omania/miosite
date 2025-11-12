@@ -29,7 +29,7 @@ export default function ComplexityPage() {
             Анализ сложности
           </h1>
           <p className="text-xl text-gray-600">
-            Оценка сложности интерфейса по методике Complexity Analysis
+            Оценка сложности интерфейса по методике IBM Complexity Analysis
           </p>
         </div>
 

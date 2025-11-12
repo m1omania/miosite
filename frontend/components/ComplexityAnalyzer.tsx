@@ -114,6 +114,7 @@ export default function ComplexityAnalyzer() {
   });
 
   const [activeTab, setActiveTab] = useState<'versionA' | 'versionB' | 'comparison'>('versionA');
+  const [expandedSteps, setExpandedSteps] = useState<{ [key: string]: boolean }>({});
 
   const calculateStepScore = (ratings: StepRating): number => {
     let total = 0;
@@ -152,12 +153,28 @@ export default function ComplexityAnalyzer() {
       }
     };
     
+    const newStepIndex = state[version].steps.length;
+    
+    // Новый шаг развернут
+    setExpandedSteps({
+      ...expandedSteps,
+      [`${version}-${newStepIndex}`]: true
+    });
+    
     setState({
       ...state,
       [version]: {
         ...state[version],
         steps: [...state[version].steps, stepData]
       }
+    });
+  };
+  
+  const toggleStep = (version: 'versionA' | 'versionB', stepIndex: number) => {
+    const key = `${version}-${stepIndex}`;
+    setExpandedSteps({
+      ...expandedSteps,
+      [key]: !expandedSteps[key]
     });
   };
 
@@ -202,6 +219,27 @@ export default function ComplexityAnalyzer() {
     });
   };
 
+  const removeVersionB = () => {
+    setState({
+      ...state,
+      versionB: {
+        name: '',
+        role: '',
+        task: '',
+        steps: []
+      }
+    });
+    setActiveTab('versionA');
+    // Очищаем состояние развернутости для версии B
+    const newExpandedSteps: { [key: string]: boolean } = {};
+    Object.keys(expandedSteps).forEach(key => {
+      if (!key.startsWith('versionB-')) {
+        newExpandedSteps[key] = expandedSteps[key];
+      }
+    });
+    setExpandedSteps(newExpandedSteps);
+  };
+
   const cloneFromA = () => {
     setState({
       ...state,
@@ -217,7 +255,7 @@ export default function ComplexityAnalyzer() {
   return (
     <div className="max-w-6xl mx-auto p-6">
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-gray-300 mb-6">
+      <div className="flex gap-2 border-b border-gray-300 mb-6 justify-center">
         <button
           onClick={() => setActiveTab('versionA')}
           className={`px-6 py-3 font-medium transition-colors border-b-2 ${
@@ -228,33 +266,47 @@ export default function ComplexityAnalyzer() {
         >
           Версия A
         </button>
-        <button
-          onClick={() => setActiveTab('versionB')}
-          className={`px-6 py-3 font-medium transition-colors border-b-2 ${
-            activeTab === 'versionB'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-gray-600 hover:text-gray-900'
-          }`}
-        >
-          Версия B
-        </button>
-        <button
-          onClick={() => setActiveTab('comparison')}
-          className={`px-6 py-3 font-medium transition-colors border-b-2 ${
-            activeTab === 'comparison'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-gray-600 hover:text-gray-900'
-          }`}
-        >
-          Сравнение
-        </button>
+        {state.versionB.steps.length > 0 || state.versionB.name || state.versionB.task ? (
+          <>
+            <button
+              onClick={() => setActiveTab('versionB')}
+              className={`px-6 py-3 font-medium transition-colors border-b-2 ${
+                activeTab === 'versionB'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Версия B
+            </button>
+            <button
+              onClick={() => setActiveTab('comparison')}
+              className={`px-6 py-3 font-medium transition-colors border-b-2 ${
+                activeTab === 'comparison'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Сравнение
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => {
+              addStep('versionB');
+              setActiveTab('versionB');
+            }}
+            className="px-6 py-3 font-medium transition-colors border-b-2 border-transparent text-gray-600 hover:text-gray-900"
+          >
+            Добавить версию
+          </button>
+        )}
       </div>
 
       {/* Version A Tab */}
       {activeTab === 'versionA' && (
         <div>
       <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-            <h2 className="text-2xl font-semibold mb-4">Настройка Версии A</h2>
+            <h2 className="text-2xl mb-4">Версия A</h2>
             <div className="bg-blue-50 border-l-4 border-blue-500 p-4 mb-4 rounded">
               <p className="text-sm text-gray-700">
                 Заполните информацию о вашем интерфейсе и задаче пользователя. Затем добавьте шаги и оцените сложность каждого шага по 6 измерениям.
@@ -287,18 +339,42 @@ export default function ComplexityAnalyzer() {
 
           {/* Steps */}
           <div className="space-y-4 mb-6">
-            {state.versionA.steps.map((step, stepIndex) => (
-              <div key={stepIndex} className="bg-blue-50 border border-gray-300 rounded-lg p-5">
+            {state.versionA.steps.map((step, stepIndex) => {
+              const isExpanded = expandedSteps[`versionA-${stepIndex}`] !== false;
+              const stepScore = calculateStepScore(step.ratings);
+              
+              return (
+              <div key={stepIndex} id={`step-versionA-${stepIndex}`} className="bg-blue-50 border border-gray-300 rounded-lg p-5">
         <div className="flex justify-between items-center mb-4">
-                  <span className="text-lg font-semibold">Шаг {stepIndex + 1}</span>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => toggleStep('versionA', stepIndex)}
+                      className="text-lg hover:text-blue-600 transition-colors"
+                    >
+                      Шаг {stepIndex + 1}: {step.name || 'Без названия'}
+                    </button>
+                    {!isExpanded && (
+                      <span className="text-sm text-gray-600">(Сложность: {stepScore})</span>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => toggleStep('versionA', stepIndex)}
+                      className="px-3 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+                    >
+                      {isExpanded ? 'Свернуть' : 'Развернуть'}
+                    </button>
             <button
                     onClick={() => removeStep('versionA', stepIndex)}
                           className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
             >
                           Удалить
             </button>
+                  </div>
         </div>
                 
+                {isExpanded && (
+                  <>
                 <div className="mb-4">
                   <label className="block text-sm font-medium text-gray-700 mb-2">Название шага</label>
                   <input
@@ -312,7 +388,7 @@ export default function ComplexityAnalyzer() {
 
                 {Object.entries(dimensions).map(([dimKey, dimConfig]) => (
                   <div key={dimKey} className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm text-gray-700 mb-1">
                       {dimConfig.label}
                     </label>
                     <div className="text-xs text-gray-600 mb-2">{dimConfig.description}</div>
@@ -322,7 +398,7 @@ export default function ComplexityAnalyzer() {
                 return (
                           <label
                             key={option.value}
-                            className="flex items-start p-2 border border-gray-300 rounded cursor-pointer hover:bg-gray-50"
+                            className="flex items-start p-2 cursor-pointer hover:bg-gray-50 rounded"
                           >
                             <input
                               type="radio"
@@ -333,7 +409,7 @@ export default function ComplexityAnalyzer() {
                               className="mt-1 mr-2"
                             />
                             <span className="text-sm">
-                              <strong>{option.value}:</strong> {option.label}
+                              {option.label}
                             </span>
                           </label>
                         );
@@ -344,12 +420,15 @@ export default function ComplexityAnalyzer() {
                 
                 <div className="mt-4 p-4 bg-yellow-50 border border-gray-300 rounded-lg text-center">
                   <div className="text-sm text-gray-600 mb-1">Сложность шага</div>
-                  <div className="text-3xl font-bold text-blue-600">
-                    {calculateStepScore(step.ratings)}
+                  <div className="text-3xl text-blue-600">
+                    {stepScore}
             </div>
               </div>
+                  </>
+                )}
               </div>
-            ))}
+            );
+            })}
               </div>
 
           {/* Add Step Button */}
@@ -367,7 +446,7 @@ export default function ComplexityAnalyzer() {
             <div className="bg-yellow-50 border border-gray-300 rounded-lg p-6 mb-6">
               <div className="text-center mb-4">
                 <div className="text-sm text-gray-600 mb-2">Общая сложность Версии A</div>
-                <div className="text-5xl font-bold text-blue-600">
+                <div className="text-5xl text-blue-600">
                   {calculateTotalScore('versionA')}
                 </div>
               </div>
@@ -410,7 +489,7 @@ export default function ComplexityAnalyzer() {
                     <div key={index} className="bg-white rounded-lg p-4 border border-gray-200" style={{ overflow: 'visible' }}>
                       <div className="flex justify-between items-center mb-2">
                         <div className="font-medium">Шаг {index + 1}: {step.name || `Шаг ${index + 1}`}</div>
-                        <div className="text-lg font-bold text-blue-600">{stepScore}</div>
+                        <div className="text-lg text-blue-600">{stepScore}</div>
                       </div>
                       <div className="w-full bg-gray-200 h-4 flex relative" style={{ borderRadius: '9999px', overflow: 'visible' }}>
                         {criteriaContributions.map((criteria, critIndex) => {
@@ -428,7 +507,7 @@ export default function ComplexityAnalyzer() {
                             >
                               <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-opacity z-[100]">
                                 <div className="bg-gray-900 text-white text-xs rounded-lg py-2 px-3 shadow-xl" style={{ whiteSpace: 'normal', minWidth: '200px', maxWidth: '300px' }}>
-                                  <div className="font-semibold mb-1">{criteria.label}</div>
+                                  <div className="mb-1">{criteria.label}</div>
                                   <div className="text-gray-300 text-xs mb-1">{criteria.description}</div>
                                   <div className="text-blue-300 font-medium">Значение: {criteria.value}</div>
                                   <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-full">
@@ -453,7 +532,15 @@ export default function ComplexityAnalyzer() {
       {activeTab === 'versionB' && (
         <div>
       <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-            <h2 className="text-2xl font-semibold mb-4">Настройка Версии B</h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-2xl">Версия B</h2>
+              <button
+                onClick={removeVersionB}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+              >
+                Удалить версию
+              </button>
+            </div>
             <div className="bg-blue-50 border-l-4 border-blue-500 p-4 mb-4 rounded">
               <p className="text-sm text-gray-700">
                 Создайте вторую версию интерфейса для сравнения. Вы можете клонировать Версию A или начать с чистого листа.
@@ -494,18 +581,42 @@ export default function ComplexityAnalyzer() {
 
           {/* Steps */}
           <div className="space-y-4 mb-6">
-            {state.versionB.steps.map((step, stepIndex) => (
-              <div key={stepIndex} className="bg-orange-50 border border-gray-300 rounded-lg p-5">
+            {state.versionB.steps.map((step, stepIndex) => {
+              const isExpanded = expandedSteps[`versionB-${stepIndex}`] !== false;
+              const stepScore = calculateStepScore(step.ratings);
+              
+              return (
+              <div key={stepIndex} id={`step-versionB-${stepIndex}`} className="bg-orange-50 border border-gray-300 rounded-lg p-5">
           <div className="flex justify-between items-center mb-4">
-                  <span className="text-lg font-semibold">Шаг {stepIndex + 1}</span>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => toggleStep('versionB', stepIndex)}
+                      className="text-lg hover:text-orange-600 transition-colors"
+                    >
+                      Шаг {stepIndex + 1}: {step.name || 'Без названия'}
+                    </button>
+                    {!isExpanded && (
+                      <span className="text-sm text-gray-600">(Сложность: {stepScore})</span>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => toggleStep('versionB', stepIndex)}
+                      className="px-3 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+                    >
+                      {isExpanded ? 'Свернуть' : 'Развернуть'}
+                    </button>
             <button
                     onClick={() => removeStep('versionB', stepIndex)}
                     className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
             >
                     Удалить
             </button>
+                  </div>
           </div>
 
+                {isExpanded && (
+                  <>
                 <div className="mb-4">
                   <label className="block text-sm font-medium text-gray-700 mb-2">Название шага</label>
                   <input
@@ -519,7 +630,7 @@ export default function ComplexityAnalyzer() {
 
                 {Object.entries(dimensions).map(([dimKey, dimConfig]) => (
                   <div key={dimKey} className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm text-gray-700 mb-1">
                       {dimConfig.label}
                     </label>
                     <div className="text-xs text-gray-600 mb-2">{dimConfig.description}</div>
@@ -529,7 +640,7 @@ export default function ComplexityAnalyzer() {
                   return (
                           <label
                             key={option.value}
-                            className="flex items-start p-2 border border-gray-300 rounded cursor-pointer hover:bg-gray-50"
+                            className="flex items-start p-2 cursor-pointer hover:bg-gray-50 rounded"
                           >
                   <input
                     type="radio"
@@ -540,7 +651,7 @@ export default function ComplexityAnalyzer() {
                     className="mt-1 mr-2"
                   />
                             <span className="text-sm">
-                              <strong>{option.value}:</strong> {option.label}
+                              {option.label}
                             </span>
                 </label>
                   );
@@ -552,11 +663,14 @@ export default function ComplexityAnalyzer() {
                 <div className="mt-4 p-4 bg-yellow-50 border border-gray-300 rounded-lg text-center">
                   <div className="text-sm text-gray-600 mb-1">Сложность шага</div>
                   <div className="text-3xl font-bold text-blue-600">
-                    {calculateStepScore(step.ratings)}
+                    {stepScore}
                       </div>
                     </div>
+                  </>
+                )}
                   </div>
-            ))}
+            );
+            })}
                 </div>
 
           {/* Add Step Button */}
@@ -574,9 +688,9 @@ export default function ComplexityAnalyzer() {
             <div className="bg-yellow-50 border border-gray-300 rounded-lg p-6 mb-6" style={{ overflow: 'visible' }}>
               <div className="text-center mb-4">
                 <div className="text-sm text-gray-600 mb-2">Общая сложность Версии B</div>
-                <div className="text-5xl font-bold text-blue-600">
+                <div className="text-5xl text-blue-600">
                   {calculateTotalScore('versionB')}
-        </div>
+                </div>
           </div>
 
               {/* Steps breakdown */}
@@ -617,7 +731,7 @@ export default function ComplexityAnalyzer() {
                     <div key={index} className="bg-white rounded-lg p-4 border border-gray-200" style={{ overflow: 'visible' }}>
                       <div className="flex justify-between items-center mb-2">
                         <div className="font-medium">Шаг {index + 1}: {step.name || `Шаг ${index + 1}`}</div>
-                        <div className="text-lg font-bold text-blue-600">{stepScore}</div>
+                        <div className="text-lg text-blue-600">{stepScore}</div>
                       </div>
                       <div className="w-full bg-gray-200 h-4 flex relative" style={{ borderRadius: '9999px', overflow: 'visible' }}>
                         {criteriaContributions.map((criteria, critIndex) => {
@@ -635,7 +749,7 @@ export default function ComplexityAnalyzer() {
                             >
                               <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-opacity z-[100]">
                                 <div className="bg-gray-900 text-white text-xs rounded-lg py-2 px-3 shadow-xl" style={{ whiteSpace: 'normal', minWidth: '200px', maxWidth: '300px' }}>
-                                  <div className="font-semibold mb-1">{criteria.label}</div>
+                                  <div className="mb-1">{criteria.label}</div>
                                   <div className="text-gray-300 text-xs mb-1">{criteria.description}</div>
                                   <div className="text-blue-300 font-medium">Значение: {criteria.value}</div>
                                   <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-full">
@@ -659,7 +773,7 @@ export default function ComplexityAnalyzer() {
       {/* Comparison Tab */}
       {activeTab === 'comparison' && (
         <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-2xl font-semibold mb-4">Сравнение версий</h2>
+          <h2 className="text-2xl mb-4">Сравнение версий</h2>
           
           {state.versionA.steps.length === 0 || state.versionB.steps.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
@@ -671,15 +785,15 @@ export default function ComplexityAnalyzer() {
               <div className="grid grid-cols-4 gap-4 mb-6 p-6 bg-blue-50 rounded-lg">
                 <div className="text-center">
                   <div className="text-sm text-gray-600 mb-2">{state.versionA.name || 'Версия A'}</div>
-                  <div className="text-3xl font-bold text-blue-600">
+                  <div className="text-3xl text-blue-600">
                     {calculateTotalScore('versionA')}
-              </div>
+                  </div>
               </div>
                 <div className="text-center">
                   <div className="text-sm text-gray-600 mb-2">{state.versionB.name || 'Версия B'}</div>
-                  <div className="text-3xl font-bold text-orange-600">
+                  <div className="text-3xl text-orange-600">
                     {calculateTotalScore('versionB')}
-              </div>
+                  </div>
             </div>
                 {(() => {
                   const totalA = calculateTotalScore('versionA');
@@ -691,13 +805,13 @@ export default function ComplexityAnalyzer() {
                     <>
                       <div className="text-center">
                         <div className="text-sm text-gray-600 mb-2">Разница</div>
-                        <div className={`text-3xl font-bold ${diff < 0 ? 'text-green-600' : diff > 0 ? 'text-red-600' : ''}`}>
+                        <div className={`text-3xl ${diff < 0 ? 'text-green-600' : diff > 0 ? 'text-red-600' : ''}`}>
                           {diff > 0 ? '+' : ''}{diff}
                         </div>
                       </div>
                       <div className="text-center">
                         <div className="text-sm text-gray-600 mb-2">Изменение</div>
-                        <div className={`text-3xl font-bold ${diff < 0 ? 'text-green-600' : diff > 0 ? 'text-red-600' : ''}`}>
+                        <div className={`text-3xl ${diff < 0 ? 'text-green-600' : diff > 0 ? 'text-red-600' : ''}`}>
                           {percentChange > 0 ? '+' : ''}{percentChange}%
                         </div>
                       </div>
@@ -730,12 +844,12 @@ export default function ComplexityAnalyzer() {
                           : 'border-gray-200'
                       }`}
                     >
-                      <h3 className="text-xl font-semibold mb-3">{name}</h3>
+                      <h3 className="text-xl mb-3">{name}</h3>
                       <p className="text-sm text-gray-600 mb-2"><strong>Задача:</strong> {variant.task || 'Не указано'}</p>
                       <p className="text-sm text-gray-600 mb-4"><strong>Количество шагов:</strong> {variant.steps.length}</p>
                       <div className="bg-yellow-50 rounded-lg p-4 text-center">
                         <div className="text-sm text-gray-600 mb-1">Общая сложность</div>
-                        <div className="text-4xl font-bold text-blue-600">{total}</div>
+                        <div className="text-4xl text-blue-600">{total}</div>
           </div>
         </div>
                 );
@@ -748,7 +862,7 @@ export default function ComplexityAnalyzer() {
                 
                 return (
                   <div className="mb-6">
-                    <h3 className="text-xl font-semibold mb-4">Сравнение по шагам</h3>
+                    <h3 className="text-xl mb-4">Сравнение по шагам</h3>
                     {Array.from({ length: maxSteps }).map((_, index) => {
                       const stepA = state.versionA.steps[index];
                       const stepB = state.versionB.steps[index];
@@ -771,12 +885,12 @@ export default function ComplexityAnalyzer() {
                             <div className="text-center p-3 bg-blue-50 rounded">
                               <strong>{state.versionA.name || 'Версия A'}</strong><br />
                               {stepA?.name || `Шаг ${index + 1}`}<br />
-                              <span className="text-2xl font-bold">{scoreA}</span>
+                              <span className="text-2xl">{scoreA}</span>
               </div>
                             <div className="text-center p-3 bg-orange-50 rounded">
                               <strong>{state.versionB.name || 'Версия B'}</strong><br />
                               {stepB?.name || `Шаг ${index + 1}`}<br />
-                              <span className="text-2xl font-bold">{scoreB}</span>
+                              <span className="text-2xl">{scoreB}</span>
               </div>
               </div>
     </div>
@@ -800,7 +914,7 @@ export default function ComplexityAnalyzer() {
                 
                 return (
                   <div className="mb-6 p-6 bg-white border border-gray-300 rounded-lg">
-                    <h3 className="text-xl font-semibold mb-6 text-center">Сравнение общей сложности</h3>
+                    <h3 className="text-xl mb-6 text-center">Сравнение общей сложности</h3>
                     <div className="flex items-start justify-center">
                       {/* Y-axis label */}
                       <div className="flex items-center justify-center mr-3" style={{ width: '50px', height: `${chartHeight}px` }}>
@@ -954,7 +1068,7 @@ export default function ComplexityAnalyzer() {
 
   return (
                   <div className="mb-6 p-6 bg-white border border-gray-300 rounded-lg">
-                    <h3 className="text-xl font-semibold mb-6 text-center">График сравнения по шагам</h3>
+                    <h3 className="text-xl mb-6 text-center">График сравнения по шагам</h3>
                     
                     {/* Legend */}
                     <div className="flex justify-center gap-6 mb-4">
@@ -1142,13 +1256,13 @@ export default function ComplexityAnalyzer() {
                 if (topHotspots.length > 0) {
                   return (
                     <div>
-                      <h3 className="text-xl font-semibold mb-4">Точки сложности (топ-5)</h3>
+                      <h3 className="text-xl mb-4">Точки сложности (топ-5)</h3>
             <div className="space-y-2">
                         {topHotspots.map((hotspot, idx) => (
                           <div key={idx} className="border rounded-lg p-3">
                             <strong>{idx + 1}. {hotspot.version} - Шаг {hotspot.stepIndex + 1}</strong><br />
                             {hotspot.name}<br />
-                            <span className="text-lg font-bold text-red-600">{hotspot.score}</span>
+                            <span className="text-lg text-red-600">{hotspot.score}</span>
                           </div>
               ))}
             </div>
