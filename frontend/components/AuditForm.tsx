@@ -52,7 +52,6 @@ export default function AuditForm({ onAuditStart, onAuditComplete, onError }: Au
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const dropZoneRef = useRef<HTMLDivElement>(null);
   
   // Генерируем 3 случайных сайта при каждом открытии списка
   const generateRandomSites = () => {
@@ -127,34 +126,13 @@ export default function AuditForm({ onAuditStart, onAuditComplete, onError }: Au
       return;
     }
 
-    // Проверяем разрешение изображения
+    // Обрабатываем изображение (без ограничений по разрешению для длинных сайтов)
     try {
       setLoading(true);
-      const img = new Image();
-      const imageUrl = URL.createObjectURL(file);
       
-      await new Promise((resolve, reject) => {
-        img.onload = () => {
-          URL.revokeObjectURL(imageUrl);
-          // Поддерживаем как горизонтальные (1280×720), так и вертикальные (720×1280) изображения
-          const maxWidth = 1920;
-          const maxHeight = 1920;
-          
-          if (img.width > maxWidth || img.height > maxHeight) {
-            reject(new Error(`Изображение слишком большое (${img.width}×${img.height}px). Максимальное разрешение: 1920×1920px. Рекомендуется: 1280×720 (горизонтальное) или 720×1280 (вертикальное)`));
-            return;
-          }
-          resolve(null);
-        };
-        img.onerror = () => {
-          URL.revokeObjectURL(imageUrl);
-          reject(new Error('Не удалось загрузить изображение для проверки'));
-        };
-        img.src = imageUrl;
-      });
-
       // Если все проверки пройдены, сжимаем изображение
-      const compressedImage = await compressImage(file);
+      // Ограничиваем только ширину (1920px), высота может быть любой для длинных сайтов
+      const compressedImage = await compressImage(file, 1920, 10000, 0.85);
       setImagePreview(compressedImage);
       setImageFile(file);
       setUrl(''); // Очищаем URL при загрузке картинки
@@ -179,6 +157,11 @@ export default function AuditForm({ onAuditStart, onAuditComplete, onError }: Au
     let dragCounter = 0;
 
     const handleDragEnter = (e: DragEvent) => {
+      // Не обрабатываем, если событие на кнопке или input
+      const target = e.target as HTMLElement;
+      if (target?.closest('button') || target?.closest('input')) {
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       dragCounter++;
@@ -189,6 +172,11 @@ export default function AuditForm({ onAuditStart, onAuditComplete, onError }: Au
     };
 
     const handleDragOver = (e: DragEvent) => {
+      // Не обрабатываем, если событие на кнопке или input
+      const target = e.target as HTMLElement;
+      if (target?.closest('button') || target?.closest('input')) {
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       // Устанавливаем эффект копирования
@@ -198,6 +186,11 @@ export default function AuditForm({ onAuditStart, onAuditComplete, onError }: Au
     };
 
     const handleDragLeave = (e: DragEvent) => {
+      // Не обрабатываем, если событие на кнопке или input
+      const target = e.target as HTMLElement;
+      if (target?.closest('button') || target?.closest('input')) {
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       dragCounter--;
@@ -209,6 +202,11 @@ export default function AuditForm({ onAuditStart, onAuditComplete, onError }: Au
     };
 
     const handleDrop = (e: DragEvent) => {
+      // Не обрабатываем, если событие на кнопке или input
+      const target = e.target as HTMLElement;
+      if (target?.closest('button') || target?.closest('input')) {
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       dragCounter = 0;
@@ -477,103 +475,23 @@ export default function AuditForm({ onAuditStart, onAuditComplete, onError }: Au
           </button>
         </div>
       ) : (
-        // Анализ по картинке - drag & drop зона
+        // Анализ по картинке - простая кнопка загрузки
         <>
-          {/* Overlay для drag & drop на всем окне */}
-          {isDragging && (
-            <div className="fixed inset-0 z-50 bg-blue-500/20 backdrop-blur-sm flex items-center justify-center pointer-events-none">
-              <div className="bg-white rounded-lg shadow-2xl p-8 border-4 border-blue-500 border-dashed pointer-events-none">
-                <div className="text-center">
-                  <svg className="w-16 h-16 text-blue-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                  <p className="text-xl font-semibold text-gray-800">Отпустите файл для загрузки</p>
-                </div>
-              </div>
-            </div>
-          )}
-          <div 
-            ref={dropZoneRef}
-            className={`relative transition-all ${isDragging ? 'ring-4 ring-blue-500 ring-offset-2' : ''}`}
-            onDragEnter={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              if (e.dataTransfer?.types.includes('Files')) {
-                setIsDragging(true);
-              }
-            }}
-            onDragOver={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              if (e.dataTransfer) {
-                e.dataTransfer.dropEffect = 'copy';
-              }
-            }}
-            onDragLeave={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              // Проверяем, что покинули именно этот элемент, а не дочерний
-              if (e.currentTarget === e.target) {
-                setIsDragging(false);
-              }
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setIsDragging(false);
-
-              const files = e.dataTransfer?.files;
-              if (files && files.length > 0) {
-                const file = files[0];
-                if (file.type.startsWith('image/')) {
-                  handleFileSelect(file);
-                } else {
-                  onError('Пожалуйста, перетащите изображение');
-                }
-              }
-            }}
-          >
-          {imagePreview ? (
-            <div className="relative mb-4">
-              <img 
-                src={imagePreview} 
-                alt="Preview" 
-                className="w-full h-48 object-contain rounded-lg border border-gray-200"
-              />
-              <button
-                type="button"
-                onClick={clearImage}
-                className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-8 h-8 flex items-center justify-center hover:bg-red-600 transition-colors"
-                title="Удалить картинку"
-              >
-                ×
-              </button>
-            </div>
-          ) : (
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center hover:border-blue-400 transition-colors bg-gray-50">
-              <div className="flex flex-col items-center">
-                <svg className="w-12 h-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                </svg>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={loading}
-                  className="text-blue-600 hover:text-blue-700 underline text-lg font-medium disabled:text-gray-400 disabled:cursor-not-allowed mb-2"
-                >
-                  Выбрать файл
-                </button>
-                <p className="text-sm text-gray-500">или перетащите изображение сюда</p>
-              </div>
-            </div>
-          )}
-
-          {/* Скрытый input для выбора файла */}
+          {/* Скрытый input для выбора файла - правильный способ скрытия для Chrome */}
           <input
             ref={fileInputRef}
+            id="file-input"
             type="file"
             accept="image/*"
-            className="hidden"
+            style={{
+              position: 'absolute',
+              width: '1px',
+              height: '1px',
+              opacity: 0,
+              overflow: 'hidden',
+              clip: 'rect(0 0 0 0)',
+              whiteSpace: 'nowrap'
+            }}
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) {
@@ -582,33 +500,109 @@ export default function AuditForm({ onAuditStart, onAuditComplete, onError }: Au
             }}
           />
 
-          {/* Требования к изображению (показываем только если картинка не загружена) */}
-          {!imagePreview && (
-            <div className="mt-4 text-center text-xs text-gray-500">
-              <p className="font-medium mb-1">Требования к изображению:</p>
-              <ul className="space-y-0.5">
-                <li>— Форматы: JPG, PNG, WebP</li>
-                <li>— Максимальный размер файла: 10 MB (до сжатия)</li>
-                <li>— Максимальное разрешение: 1920×1920px</li>
-                <li>— Рекомендуется: 1280×720 (горизонтальное) или 720×1280 (вертикальное)</li>
-                <li>— Автоматически сжимается до ≤ 0.8 MB для анализа ИИ</li>
-              </ul>
-            </div>
-          )}
+          {imagePreview ? (
+            <div className="space-y-4">
+              {/* Превью изображения */}
+              <div className="relative">
+                <img 
+                  src={imagePreview} 
+                  alt="Preview" 
+                  className="w-full h-48 object-contain rounded-lg border border-gray-200"
+                />
+                <button
+                  type="button"
+                  onClick={clearImage}
+                  className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-8 h-8 flex items-center justify-center hover:bg-red-600 transition-colors"
+                  title="Удалить картинку"
+                >
+                  ×
+                </button>
+              </div>
 
-          {/* Кнопка анализа для картинки */}
-          {imagePreview && (
-            <div className="mt-4">
+              {/* Кнопка анализа */}
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors font-medium"
               >
                 {loading ? 'Анализ...' : 'Анализировать'}
               </button>
             </div>
+          ) : (
+            <>
+              {/* Overlay для drag & drop на всем окне */}
+              {isDragging && (
+                <div className="fixed inset-0 z-50 bg-blue-500/20 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+                  <div className="bg-white rounded-lg shadow-2xl p-8 border-4 border-blue-500 border-dashed pointer-events-none">
+                    <div className="text-center">
+                      <svg className="w-16 h-16 text-blue-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                      <p className="text-xl font-semibold text-gray-800">Отпустите файл для загрузки</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Декоративная область - псевдо drag & drop зона с кнопкой */}
+              <div className="space-y-4">
+                <div className="relative">
+                  {/* Декоративная рамка */}
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center hover:border-blue-400 transition-colors bg-gray-50">
+                    <div className="flex flex-col items-center">
+                      <svg className="w-12 h-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                      
+                      {/* Контейнер с кнопкой и input поверх неё */}
+                      <div className="relative inline-block">
+                        {/* Кнопка */}
+                        <button
+                          type="button"
+                          className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium cursor-pointer relative z-10 pointer-events-none"
+                        >
+                          Выбрать файл
+                        </button>
+                        
+                        {/* Input поверх кнопки - прозрачный, но с размерами кнопки */}
+                        <input
+                          ref={fileInputRef}
+                          id="file-input"
+                          type="file"
+                          accept="image/*"
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            width: '100%',
+                            height: '100%',
+                            opacity: 0,
+                            cursor: 'pointer',
+                            zIndex: 20
+                          }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              handleFileSelect(file);
+                            }
+                          }}
+                        />
+                      </div>
+                      
+                      <p className="text-sm text-gray-500 mt-2">или перетащите изображение сюда</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Требования к изображению */}
+                {!imagePreview && (
+                  <div className="text-center text-xs text-gray-500">
+                    <p>JPG, PNG, WebP до 2 MB</p>
+                  </div>
+                )}
+              </div>
+            </>
           )}
-          </div>
         </>
       )}
     </form>

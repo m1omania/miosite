@@ -11,6 +11,7 @@ interface ReportDisplayProps {
 
 export default function ReportDisplay({ report }: ReportDisplayProps) {
   const [copied, setCopied] = useState(false);
+  const [isImageModalOpen, setIsImageModalOpen] = useState(false);
 
   // Функция для копирования текста анализа
   const handleCopyAnalysis = async () => {
@@ -50,9 +51,46 @@ export default function ReportDisplay({ report }: ReportDisplayProps) {
           <img
             src={report.screenshots.desktop}
             alt="Desktop скриншот"
-            className="w-full h-auto"
+            className="w-full h-auto cursor-pointer hover:opacity-90 transition-opacity"
             style={{ maxHeight: '400px', objectFit: 'contain' }}
+            onClick={() => setIsImageModalOpen(true)}
           />
+        </div>
+      )}
+
+      {/* Модальное окно для увеличенного скриншота */}
+      {isImageModalOpen && report.screenshots?.desktop && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75 p-4"
+          onClick={() => setIsImageModalOpen(false)}
+        >
+          <div className="relative max-w-7xl max-h-full">
+            <img
+              src={report.screenshots.desktop}
+              alt="Desktop скриншот (увеличенный)"
+              className="max-w-full max-h-[90vh] object-contain rounded-lg"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <button
+              onClick={() => setIsImageModalOpen(false)}
+              className="absolute top-4 right-4 text-white bg-black bg-opacity-50 hover:bg-opacity-75 rounded-full p-2 transition-all"
+              aria-label="Закрыть"
+            >
+              <svg
+                className="w-6 h-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          </div>
         </div>
       )}
 

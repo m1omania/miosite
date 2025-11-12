@@ -247,8 +247,10 @@ router.post('/', async (req, res) => {
       let estimatedSizeMB = (base64Data.length * 3) / 4 / 1024 / 1024;
       console.log('   Примерный размер изображения:', estimatedSizeMB.toFixed(2), 'MB');
       
-      // Если изображение слишком большое (>0.8MB), уменьшаем его
-      const MAX_SIZE_MB = 0.8; // Безопасный лимит для Hugging Face API
+      // Если изображение слишком большое, уменьшаем его
+      // Hugging Face Router API обычно принимает изображения до 4-5 MB в base64
+      // Но для надежности используем 2 MB как безопасный лимит
+      const MAX_SIZE_MB = 2.0; // Увеличенный лимит для дизайнерских макетов
       if (estimatedSizeMB > MAX_SIZE_MB) {
         console.warn(`⚠️  Изображение слишком большое (${estimatedSizeMB.toFixed(2)}MB) для Hugging Face API (лимит ~${MAX_SIZE_MB}MB)`);
         console.warn('   Уменьшаю изображение через Puppeteer...');
@@ -995,11 +997,118 @@ router.post('/', async (req, res) => {
     await page.setViewportSize({ width: 1920, height: 1080 });
     await new Promise(resolve => setTimeout(resolve, 500));
     
-    // Создаем адаптивный скриншот для AI анализа (полная страница с автоматической оптимизацией)
-    const desktopScreenshotForAI = await createViewportScreenshot(8); // Максимум 8MB - только viewport (быстрее)
+    // Функция для создания скриншота секции страницы
+    const createSectionScreenshot = async (sectionName: string, scrollY: number, height: number): Promise<string> => {
+      console.log(`📸 Создаю скриншот секции: ${sectionName} (scrollY: ${scrollY}, height: ${height})`);
+      
+      // Прокручиваем страницу к нужной секции
+      await page.evaluate((y) => {
+        window.scrollTo(0, y);
+      }, scrollY);
+      
+      // Ждем прокрутки
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Получаем размеры страницы
+      const pageHeight = await page.evaluate(() => document.documentElement.scrollHeight);
+      const viewportHeight = 1080; // Высота viewport
+      
+      // Вычисляем, сколько нужно прокрутить для захвата нужной секции
+      const actualScrollY = Math.min(scrollY, pageHeight - viewportHeight);
+      
+      // Прокручиваем к нужной позиции
+      await page.evaluate((y) => {
+        window.scrollTo(0, y);
+      }, actualScrollY);
+      
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Создаем скриншот viewport (видимая область)
+      const screenshotBuffer = await page.screenshot({
+        type: 'jpeg',
+        quality: 70, // Среднее качество для экономии размера
+      });
+      
+      const screenshot = screenshotBuffer.toString('base64');
+      console.log(`✅ Скриншот секции ${sectionName} создан: ${Math.round(screenshot.length / 1024)} KB`);
+      
+      return screenshot;
+    };
+    
+    // Сначала прокручиваем страницу в начало, чтобы правильно определить позиции секций
+    await page.evaluate(() => {
+      window.scrollTo(0, 0);
+    });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    
+    // Определяем секции страницы (теперь scrollY = 0, координаты будут правильными)
+    const pageDimensions = await page.evaluate(() => {
+      const header = document.querySelector('header, [role="banner"], .header, #header');
+      const footer = document.querySelector('footer, [role="contentinfo"], .footer, #footer');
+      const main = document.querySelector('main, [role="main"], .main, #main, .content');
+      
+      // getBoundingClientRect() возвращает координаты относительно viewport
+      // Если страница прокручена в начало (scrollY = 0), то top = абсолютная позиция
+      const headerRect = header?.getBoundingClientRect();
+      const footerRect = footer?.getBoundingClientRect();
+      const mainRect = main?.getBoundingClientRect();
+      
+      const scrollY = window.scrollY || window.pageYOffset; // Должно быть 0
+      const pageHeight = document.documentElement.scrollHeight;
+      
+      return {
+        header: headerRect ? {
+          y: headerRect.top + scrollY, // Если scrollY = 0, то top уже абсолютная позиция
+          height: headerRect.height
+        } : null,
+        footer: footerRect ? {
+          y: footerRect.top + scrollY,
+          height: footerRect.height
+        } : null,
+        main: mainRect ? {
+          y: mainRect.top + scrollY,
+          height: mainRect.height
+        } : null,
+        pageHeight,
+        viewportHeight: window.innerHeight
+      };
+    });
+    
+    console.log('📐 Размеры страницы:', JSON.stringify(pageDimensions, null, 2));
+    
+    // Создаем скриншоты секций
+    const sectionScreenshots: { [key: string]: string } = {};
+    
+    // Header (верхняя часть страницы - начинаем с 0)
+    // Всегда начинаем с начала страницы для header
+    sectionScreenshots.header = await createSectionScreenshot('header', 0, pageDimensions.header ? Math.min(800, pageDimensions.header.height) : 800);
+    
+    // Main (средняя часть страницы)
+    const mainStartY = pageDimensions.header ? pageDimensions.header.y + pageDimensions.header.height : 800;
+    const mainHeight = pageDimensions.main ? pageDimensions.main.height : Math.min(1200, pageDimensions.pageHeight - mainStartY);
+    sectionScreenshots.main = await createSectionScreenshot('main', mainStartY, mainHeight);
+    
+    // Footer (нижняя часть страницы - последние 600px)
+    const footerStartY = Math.max(0, pageDimensions.pageHeight - 600);
+    if (pageDimensions.footer) {
+      sectionScreenshots.footer = await createSectionScreenshot('footer', pageDimensions.footer.y, pageDimensions.footer.height);
+    } else {
+      sectionScreenshots.footer = await createSectionScreenshot('footer', footerStartY, 600);
+    }
+    
+    // ВАЖНО: После создания всех скриншотов секций возвращаемся в начало страницы
+    // чтобы основной скриншот для отображения был с начала страницы (header)
+    await page.evaluate(() => {
+      window.scrollTo(0, 0);
+    });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    
+    // Для отображения пользователю используем первый скриншот (header) как основной
+    const desktopScreenshotForAI = sectionScreenshots.header; // Используем header для отображения
 
     // Для отображения пользователю делаем полный скриншот страницы (PNG для лучшего качества)
     // Скриншот viewport для отображения (быстрее, чем fullPage)
+    // Страница уже прокручена в начало (scrollY = 0), поэтому скриншот будет с header
     const desktopScreenshotFullBuffer = await page.screenshot({
       type: 'png',
       // Без fullPage - только viewport (видимая область)
@@ -1110,19 +1219,321 @@ router.post('/', async (req, res) => {
       };
       
       try {
-        console.log('📸 Начинаю визуальный анализ скриншота (асинхронно)...');
-        console.log('   Использую полный скриншот страницы (адаптивное качество)');
-        console.log('   Размер скриншота:', desktopScreenshotForAI.length, 'символов (base64)');
+        console.log('📸 Начинаю визуальный анализ скриншотов секций (асинхронно)...');
+        console.log('   Количество секций:', Object.keys(sectionScreenshots).length);
         
-        // Обновляем статус: общий обзор
-        await updateStatusAsync('ai_analysis', 'Проводим общий обзор дизайна...', 82);
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Небольшая задержка для визуализации
+        // Анализируем каждую секцию отдельно
+        const sectionAnalyses: { [key: string]: any } = {};
+        const allIssues: any[] = [];
+        const allSuggestions: any[] = [];
+        let totalScore = 0;
+        let sectionCount = 0;
         
-        let finalVisionAnalysis = await analyzeScreenshot(`data:image/jpeg;base64,${desktopScreenshotForAI}`);
-        console.log('✅ Визуальный анализ завершен (асинхронно)');
-        console.log('   Найдено проблем:', finalVisionAnalysis.issues.length);
-        console.log('   Рекомендаций:', finalVisionAnalysis.suggestions.length);
-        console.log('   Оценка:', finalVisionAnalysis.overallScore);
+        // Анализ header
+        if (sectionScreenshots.header) {
+          await updateStatusAsync('ai_analysis', 'Анализируем верхнюю часть страницы (header)...', 82);
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          console.log('📸 Анализирую header...');
+          sectionAnalyses.header = await analyzeScreenshot(`data:image/jpeg;base64,${sectionScreenshots.header}`);
+          allIssues.push(...sectionAnalyses.header.issues.map((issue: any) => ({
+            ...issue,
+            section: 'header'
+          })));
+          allSuggestions.push(...sectionAnalyses.header.suggestions.map((suggestion: any) => ({
+            ...suggestion,
+            section: 'header'
+          })));
+          totalScore += sectionAnalyses.header.overallScore || 0;
+          sectionCount++;
+          console.log(`✅ Header проанализирован: ${sectionAnalyses.header.issues.length} проблем, оценка ${sectionAnalyses.header.overallScore}`);
+        }
+        
+        // Анализ main
+        if (sectionScreenshots.main) {
+          await updateStatusAsync('ai_analysis', 'Анализируем основную часть страницы (main)...', 85);
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          console.log('📸 Анализирую main...');
+          sectionAnalyses.main = await analyzeScreenshot(`data:image/jpeg;base64,${sectionScreenshots.main}`);
+          allIssues.push(...sectionAnalyses.main.issues.map((issue: any) => ({
+            ...issue,
+            section: 'main'
+          })));
+          allSuggestions.push(...sectionAnalyses.main.suggestions.map((suggestion: any) => ({
+            ...suggestion,
+            section: 'main'
+          })));
+          totalScore += sectionAnalyses.main.overallScore || 0;
+          sectionCount++;
+          console.log(`✅ Main проанализирован: ${sectionAnalyses.main.issues.length} проблем, оценка ${sectionAnalyses.main.overallScore}`);
+        }
+        
+        // Анализ footer
+        if (sectionScreenshots.footer) {
+          await updateStatusAsync('ai_analysis', 'Анализируем нижнюю часть страницы (footer)...', 88);
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          console.log('📸 Анализирую footer...');
+          sectionAnalyses.footer = await analyzeScreenshot(`data:image/jpeg;base64,${sectionScreenshots.footer}`);
+          allIssues.push(...sectionAnalyses.footer.issues.map((issue: any) => ({
+            ...issue,
+            section: 'footer'
+          })));
+          allSuggestions.push(...sectionAnalyses.footer.suggestions.map((suggestion: any) => ({
+            ...suggestion,
+            section: 'footer'
+          })));
+          totalScore += sectionAnalyses.footer.overallScore || 0;
+          sectionCount++;
+          console.log(`✅ Footer проанализирован: ${sectionAnalyses.footer.issues.length} проблем, оценка ${sectionAnalyses.footer.overallScore}`);
+        }
+        
+        // Объединяем результаты в единый отчет
+        const averageScore = sectionCount > 0 ? Math.round(totalScore / sectionCount) : 0;
+        
+        // Объединяем visualDescription в единый текст
+        const visualDescriptions = [
+          sectionAnalyses.header?.visualDescription,
+          sectionAnalyses.main?.visualDescription,
+          sectionAnalyses.footer?.visualDescription
+        ].filter(Boolean);
+        const combinedVisualDescription = visualDescriptions.length > 0 
+          ? visualDescriptions.join(' ') 
+          : 'Анализ страницы завершен.';
+        
+        // Объединяем freeFormAnalysis в единый отчет (логично объединяем разделы)
+        const freeFormAnalyses = [
+          sectionAnalyses.header?.freeFormAnalysis,
+          sectionAnalyses.main?.freeFormAnalysis,
+          sectionAnalyses.footer?.freeFormAnalysis
+        ].filter(Boolean);
+        
+        let combinedFreeFormAnalysis = '';
+        if (freeFormAnalyses.length > 0) {
+          // Извлекаем разделы из каждого анализа и объединяем их
+          const allGeneralOverviews: string[] = [];
+          const allStrengths: string[] = [];
+          const allProblems: string[] = [];
+          const allRecommendations: string[] = [];
+          const allFinalScores: string[] = [];
+          
+          freeFormAnalyses.forEach((analysis) => {
+            if (!analysis) return;
+            
+            // Извлекаем ОБЩИЙ ОБЗОР
+            const overviewMatch = analysis.match(/ОБЩИЙ ОБЗОР:?\s*([\s\S]*?)(?=СИЛЬНЫЕ СТОРОНЫ|ПРОБЛЕМЫ|РЕКОМЕНДАЦИИ|ИТОГОВАЯ ОЦЕНКА|$)/i);
+            if (overviewMatch && overviewMatch[1]) {
+              allGeneralOverviews.push(overviewMatch[1].trim());
+            }
+            
+            // Извлекаем СИЛЬНЫЕ СТОРОНЫ
+            const strengthsMatch = analysis.match(/СИЛЬНЫЕ СТОРОНЫ:?\s*([\s\S]*?)(?=ПРОБЛЕМЫ|РЕКОМЕНДАЦИИ|ИТОГОВАЯ ОЦЕНКА|$)/i);
+            if (strengthsMatch && strengthsMatch[1]) {
+              allStrengths.push(strengthsMatch[1].trim());
+            }
+            
+            // Извлекаем ПРОБЛЕМЫ
+            const problemsMatch = analysis.match(/ПРОБЛЕМЫ:?\s*([\s\S]*?)(?=РЕКОМЕНДАЦИИ|ИТОГОВАЯ ОЦЕНКА|$)/i);
+            if (problemsMatch && problemsMatch[1]) {
+              allProblems.push(problemsMatch[1].trim());
+            }
+            
+            // Извлекаем РЕКОМЕНДАЦИИ
+            const recommendationsMatch = analysis.match(/РЕКОМЕНДАЦИИ:?\s*([\s\S]*?)(?=ИТОГОВАЯ ОЦЕНКА|$)/i);
+            if (recommendationsMatch && recommendationsMatch[1]) {
+              allRecommendations.push(recommendationsMatch[1].trim());
+            }
+            
+            // Извлекаем ИТОГОВАЯ ОЦЕНКА
+            const finalScoreMatch = analysis.match(/ИТОГОВАЯ ОЦЕНКА:?\s*([\s\S]*?)$/i);
+            if (finalScoreMatch && finalScoreMatch[1]) {
+              allFinalScores.push(finalScoreMatch[1].trim());
+            }
+          });
+          
+          // Функция для извлечения отдельных пунктов из текста
+          const extractItems = (text: string): string[] => {
+            // Разбиваем по строкам, убираем маркеры списка
+            return text
+              .split('\n')
+              .map(line => line.trim())
+              .filter(line => line.length > 0)
+              .map(line => line.replace(/^[-•*]\s*/, '').trim())
+              .filter(line => line.length > 0);
+          };
+          
+          // Функция для группировки похожих пунктов
+          const groupSimilarItems = (items: string[]): string[] => {
+            const grouped: Map<string, string[]> = new Map();
+            
+            items.forEach(item => {
+              // Определяем тип пункта по началу строки
+              let key = '';
+              if (item.match(/^тип интерфейса:/i)) {
+                key = 'Тип интерфейса';
+              } else if (item.match(/^первое впечатление:/i)) {
+                key = 'Первое впечатление';
+              } else if (item.match(/^основная цель страницы:/i)) {
+                key = 'Основная цель страницы';
+              } else if (item.match(/^мотивация и эмоции:/i)) {
+                key = 'Мотивация и эмоции';
+              } else {
+                // Для остальных используем первые слова как ключ
+                const match = item.match(/^([^:]+):/);
+                key = match ? match[1].trim() : item.substring(0, 30);
+              }
+              
+              if (!grouped.has(key)) {
+                grouped.set(key, []);
+              }
+              grouped.get(key)!.push(item);
+            });
+            
+            // Объединяем похожие пункты, оставляя самый полный вариант
+            const result: string[] = [];
+            grouped.forEach((values, key) => {
+              // Если есть несколько вариантов, берем самый длинный (наиболее полный)
+              const best = values.reduce((a, b) => a.length > b.length ? a : b);
+              result.push(best);
+            });
+            
+            return result;
+          };
+          
+          // Функция для удаления упоминаний "быстрая победа" из текста
+          const removeQuickWin = (text: string): string => {
+            return text
+              .replace(/[Бб]ыстрая победа[:\s]*/gi, '')
+              .replace(/\([Бб]ыстрая победа\)/gi, '')
+              .replace(/[Бб]ыстрая победа[,\s]*/gi, '')
+              .replace(/\s+/g, ' ')
+              .trim();
+          };
+          
+          // Объединяем разделы в единый отчет, убирая дубликаты
+          const parts: string[] = [];
+          
+          if (allGeneralOverviews.length > 0) {
+            // Извлекаем отдельные пункты из всех обзоров
+            const allItems: string[] = [];
+            allGeneralOverviews.forEach(overview => {
+              allItems.push(...extractItems(overview));
+            });
+            
+            // Группируем похожие пункты
+            const groupedItems = groupSimilarItems(allItems);
+            
+            parts.push('ОБЩИЙ ОБЗОР:\n\n' + groupedItems.map(item => `- ${removeQuickWin(item)}`).join('\n'));
+          }
+          
+          if (allStrengths.length > 0) {
+            // Извлекаем отдельные пункты из всех сильных сторон
+            const allItems: string[] = [];
+            allStrengths.forEach(strength => {
+              allItems.push(...extractItems(strength));
+            });
+            
+            // Группируем похожие пункты
+            const groupedItems = groupSimilarItems(allItems);
+            
+            parts.push('СИЛЬНЫЕ СТОРОНЫ:\n\n' + groupedItems.map(item => `- ${removeQuickWin(item)}`).join('\n'));
+          }
+          
+          if (allProblems.length > 0) {
+            // Для проблем просто объединяем, убирая точные дубликаты
+            const allItems: string[] = [];
+            allProblems.forEach(problem => {
+              allItems.push(...extractItems(problem));
+            });
+            
+            // Убираем точные дубликаты
+            const uniqueItems = Array.from(new Set(allItems));
+            
+            parts.push('ПРОБЛЕМЫ:\n\n' + uniqueItems.map(item => `- ${removeQuickWin(item)}`).join('\n'));
+          }
+          
+          if (allRecommendations.length > 0) {
+            // Для рекомендаций просто объединяем, убирая точные дубликаты
+            const allItems: string[] = [];
+            allRecommendations.forEach(recommendation => {
+              allItems.push(...extractItems(recommendation));
+            });
+            
+            // Убираем точные дубликаты
+            const uniqueItems = Array.from(new Set(allItems));
+            
+            parts.push('РЕКОМЕНДАЦИИ:\n\n' + uniqueItems.map(item => `- ${removeQuickWin(item)}`).join('\n'));
+          }
+          
+          if (allFinalScores.length > 0) {
+            // Для итоговой оценки берем среднюю оценку и объединяем выводы
+            const allKeyFindings = allFinalScores
+              .map(s => {
+                // Извлекаем "Ключевые выводы" из каждого анализа
+                const findingsMatch = s.match(/ключевые выводы:?\s*([^\n]+)/i);
+                return findingsMatch ? findingsMatch[1].trim() : null;
+              })
+              .filter(f => f && f.length > 0);
+            
+            const uniqueFindings = Array.from(new Set(allKeyFindings));
+            
+            const finalScoreText = `ИТОГОВАЯ ОЦЕНКА:\n\nОценка: ${averageScore}\n\n` +
+              (uniqueFindings.length > 0 ? `Ключевые выводы: ${uniqueFindings.map(f => removeQuickWin(f)).join('. ')}` : '');
+            
+            parts.push(finalScoreText);
+          }
+          
+          combinedFreeFormAnalysis = parts.join('\n\n');
+        }
+        
+        // Объединяем issues и suggestions, добавляя информацию о секции в описание (если есть)
+        const mergedIssues = allIssues.map((issue: any) => {
+          if (typeof issue === 'string') {
+            return issue;
+          }
+          // Добавляем информацию о секции в описание, если она есть
+          if (issue.section && issue.issue) {
+            const sectionName = issue.section === 'header' ? 'верхней части' : 
+                               issue.section === 'main' ? 'основной части' : 
+                               'нижней части';
+            return {
+              ...issue,
+              issue: `${issue.issue} (${sectionName} страницы)`,
+            };
+          }
+          return issue;
+        });
+        
+        const mergedSuggestions = allSuggestions.map((suggestion: any) => {
+          if (typeof suggestion === 'string') {
+            return suggestion;
+          }
+          // Добавляем информацию о секции в описание, если она есть
+          if (suggestion.section && suggestion.title) {
+            const sectionName = suggestion.section === 'header' ? 'верхней части' : 
+                               suggestion.section === 'main' ? 'основной части' : 
+                               'нижней части';
+            return {
+              ...suggestion,
+              title: suggestion.title.includes(sectionName) ? suggestion.title : `${suggestion.title} (${sectionName})`,
+            };
+          }
+          return suggestion;
+        });
+        
+        let finalVisionAnalysis = {
+          overallScore: averageScore,
+          issues: mergedIssues,
+          suggestions: mergedSuggestions,
+          visualDescription: combinedVisualDescription,
+          freeFormAnalysis: combinedFreeFormAnalysis,
+        };
+        
+        console.log('✅ Визуальный анализ всех секций завершен (асинхронно)');
+        console.log('   Всего найдено проблем:', finalVisionAnalysis.issues.length);
+        console.log('   Всего рекомендаций:', finalVisionAnalysis.suggestions.length);
+        console.log('   Средняя оценка:', finalVisionAnalysis.overallScore);
         
         // Проверяем, не является ли это моковым результатом
         const isMockResult = finalVisionAnalysis?.visualDescription?.includes('Визуальный анализ недоступен') ||
